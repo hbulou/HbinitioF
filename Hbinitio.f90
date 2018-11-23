@@ -4,7 +4,6 @@ program Hbinitio
      integer :: nindep
      integer :: ndep ! number of linear dependencies discovered
   end type t_GramSchmidt
-  type(t_GramSchmidt)::GS
   type t_mesh
      integer :: Nx,Ny,Nz,N
      integer,allocatable :: list_neighbors(:,:),n_neighbors(:)
@@ -21,16 +20,10 @@ program Hbinitio
   integer :: nvecini,nvecmax,nvec
   integer,parameter :: seed = 86456
   double precision,allocatable :: V(:,:) ! wavefunctions
-  double precision,allocatable :: VRitz(:,:) ! Ritz's vectors
-  double precision,allocatable :: T(:,:) ! reduced matrix T
-  double precision,allocatable :: S(:), Sprev(:),dS(:) ! eigenvalues
-  double precision,allocatable :: residual(:,:) ! residual
-  double precision,allocatable :: delta(:,:) ! delta vectors
-  double precision,allocatable :: Vnew(:,:) ! Vnew
-  integer :: newnvec
+  double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
   integer :: iloop
   integer :: loopmax
-  integer :: ndelta
+
   real :: start,inter,end,inter2
   integer :: i
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -60,97 +53,12 @@ program Hbinitio
   Sprev(:)=0.0
   dS(:)=0.0
   do while((iloop.le.loopmax).and.(cvg%ncvg.lt.cvg%nvec_to_cvg))
-
      write(*,'(A)') 'Main > #######################################'     
      write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
      write(*,'(A)') 'Main > #######################################'     
 
-     ! T (reduced matrix) computing
-     allocate(T(nvec,nvec))
-     call cpu_time(inter)
-     call compute_T(T,V,nvec,mesh)
-     call cpu_time(inter2)
-     call dbg(iloop,inter,inter2,'compute_T')
-
-
-     ! Diagonatilzation of T
-     allocate(S(nvec))
-     call cpu_time(inter)
-     call diagonalization(S,T,nvec)
-     call cpu_time(inter2)
-     call dbg(iloop,inter,inter2,'Diagonalization')
-
-     dS(:)=S(1:nvecini)-Sprev(:)
-     Sprev(:)=S(1:nvecini)
-     do i=1,nvecini
-        write(*,'(A,F12.6,A,E12.2,A)')"Main > Eigenvalues: ",S(i),'(',dS(i),')'
-     end do
-     call cpu_time(inter)
-     open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
-     write(1,*) inter,iloop,S(1:nvecini)
-     close(1)
-     ! computation of the Ritz's vectors
-     allocate(VRitz(mesh%N,nvec))
-     call cpu_time(inter)
-     call Ritz(VRitz,V,T,nvec)
-     call cpu_time(inter2)
-     call dbg(iloop,inter,inter2,'Ritz')
-
-     ! computation of residual
-     allocate(residual(mesh%N,nvec))
-     allocate(cvg%list_cvg(nvec))
-     cvg%list_cvg(:)=0
-     cvg%ncvg=0
-
-     call cpu_time(inter)
-     call compute_residual(residual,VRitz,S,nvec,cvg,mesh)
-     call cpu_time(inter2)
-     call dbg(iloop,inter,inter2,'residual')
-     ! computation of delta
-     allocate(delta(mesh%N,nvec))
-     delta(:,:)=0.0
-     call cpu_time(inter)
-
-     call compute_delta(delta,residual,S,nvec,cvg,mesh,ndelta)
-     call cpu_time(inter2)
-     call dbg(iloop,inter,inter2,'delta')
-
-     deallocate(V)
-     allocate(V(mesh%N,nvec+ndelta))
-     V(:,1:nvec)=VRitz(:,:)
-     print *,'ndelta=',ndelta
-     print *,'nvec=',nvec
-     V(:,nvec+1:nvec+ndelta)=delta(:,:ndelta)
-     allocate(Vnew(mesh%N,nvec+ndelta))
-     newnvec=nvec+ndelta
-     GS%nindep=nvec
-     call cpu_time(inter)
-     call GramSchmidt(Vnew,V,newnvec,mesh,GS)    
-     call cpu_time(inter2)
-     call dbg(iloop,inter,inter2,'GS')
-
-     print *,'Main > ',GS%ndep,newnvec
-     
-     deallocate(V)
-     if(newnvec.le.nvecmax) then
-        nvec=newnvec
-     else
-        print *,'Main > restart from nvecini'
-        nvec=nvecini
-     end if
-     allocate(V(mesh%N,nvec))
-     V(:,:)=Vnew(:,1:nvec)
-
-     !call check_ortho(V,nvec,mesh)
-     print *,'Main > New size of the basis ',nvec
-     iloop=iloop+1
-     deallocate(S)
-     deallocate(T)
-     deallocate(VRitz)
-     deallocate(residual)
-     deallocate(delta)
-     deallocate(Vnew)
-     deallocate(cvg%list_cvg)
+     call davidson(nvec,V,mesh,nvecini,iloop,cvg)
+       
   end do
   
   call save_cube(V,1,nvecini,mesh)  
@@ -163,6 +71,131 @@ program Hbinitio
   print '("Main > Total Time = ",e16.6," seconds.")',end-start
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 contains
+  ! --------------------------------------------------------------------------------------
+  !
+  !              Vext()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine Vext(m)
+    implicit none
+    type(t_mesh) :: m
+    
+    integer :: i,j,k,nn
+    do k=1,m%Nz
+       do i=1,m%Nx
+          do j=1,m%Ny
+             nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
+             pot_ext(nn)=0.0
+          end do
+       end do
+    end do
+  end subroutine Vext
+  ! --------------------------------------------------------------------------------------
+  !
+  !              DAVIDSON()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine davidson(nvec,V,m,nvecini,iloop,cvg)
+    implicit none
+    integer :: nvec,nvecini,iloop
+    double precision,allocatable :: V(:,:)
+    type(t_mesh) :: m
+    type(t_cvg)::cvg
+    
+    double precision,allocatable :: S(:) ! eigenvalues
+    double precision,allocatable :: T(:,:) ! reduced matrix T
+    double precision,allocatable :: VRitz(:,:) ! Ritz's vectors
+    double precision,allocatable :: residual(:,:) ! residual
+    double precision,allocatable :: delta(:,:) ! delta vectors
+    double precision,allocatable :: Vnew(:,:) ! Vnew
+    integer :: i
+    integer :: ndelta
+    integer :: newnvec
+    type(t_GramSchmidt)::GS
+    ! T (reduced matrix) computing
+    allocate(T(nvec,nvec))
+    !call cpu_time(inter)
+    call compute_T(T,V,nvec,m)
+    !call cpu_time(inter2)
+    !call dbg(iloop,inter,inter2,'compute_T')
+    
+    ! Diagonatilzation of T
+    allocate(S(nvec))
+    !call cpu_time(inter)
+    call diagonalization(S,T,nvec)
+    !call cpu_time(inter2)
+    !call dbg(iloop,inter,inter2,'Diagonalization')
+    
+    dS(:)=S(1:nvecini)-Sprev(:)
+    Sprev(:)=S(1:nvecini)
+    do i=1,nvecini
+       write(*,'(A,F12.6,A,E12.2,A)')"Main > Eigenvalues: ",S(i),'(',dS(i),')'
+    end do
+    !call cpu_time(inter)
+    open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
+    write(1,*) inter,iloop,S(1:nvecini)
+    close(1)
+    ! computation of the Ritz's vectors
+    allocate(VRitz(m%N,nvec))
+    !call cpu_time(inter)
+    call Ritz(VRitz,V,T,nvec)
+    !call cpu_time(inter2)
+    !call dbg(iloop,inter,inter2,'Ritz')
+    
+    ! computation of residual
+    allocate(residual(m%N,nvec))
+    allocate(cvg%list_cvg(nvec))
+    cvg%list_cvg(:)=0
+    cvg%ncvg=0
+    
+    !call cpu_time(inter)
+    call compute_residual(residual,VRitz,S,nvec,cvg,m)
+    !call cpu_time(inter2)
+    !call dbg(iloop,inter,inter2,'residual')
+    ! computation of delta
+    allocate(delta(m%N,nvec))
+    delta(:,:)=0.0
+    !call cpu_time(inter)
+    
+    call compute_delta(delta,residual,S,nvec,cvg,m,ndelta)
+    !call cpu_time(inter2) ; call dbg(iloop,inter,inter2,'delta')
+    
+    deallocate(V)
+    allocate(V(m%N,nvec+ndelta))
+    V(:,1:nvec)=VRitz(:,:)
+    print *,'ndelta=',ndelta
+    print *,'nvec=',nvec
+    V(:,nvec+1:nvec+ndelta)=delta(:,:ndelta)
+    allocate(Vnew(m%N,nvec+ndelta))
+    newnvec=nvec+ndelta
+    GS%nindep=nvec
+    !call cpu_time(inter)
+    call GramSchmidt(Vnew,V,newnvec,m,GS)    
+    ! call cpu_time(inter2);     call dbg(iloop,inter,inter2,'GS')
+    
+    print *,'Main > ',GS%ndep,newnvec
+    
+    deallocate(V)
+    if(newnvec.le.nvecmax) then
+       nvec=newnvec
+    else
+       print *,'Main > restart from nvecini'
+       nvec=nvecini
+    end if
+    allocate(V(m%N,nvec))
+    V(:,:)=Vnew(:,1:nvec)
+    
+    !call check_ortho(V,nvec,m)
+    print *,'Main > New size of the basis ',nvec
+    iloop=iloop+1
+    deallocate(S)
+    deallocate(T)
+    deallocate(VRitz)
+    deallocate(residual)
+    deallocate(delta)
+    deallocate(Vnew)
+    deallocate(cvg%list_cvg)
+  end subroutine davidson
   ! -----------------------------------------------
   subroutine dbg(iloop,inter,inter2,text)
     real :: inter,inter2
@@ -212,7 +245,11 @@ contains
     end do
   end subroutine save_cube
 
-  ! -----------------------------------------------
+  ! --------------------------------------------------------------------------------------
+  !
+  !              COMPUTE_DELTA()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine compute_delta(delta,r,lambda,nvec,cvg,m,ndelta)
     ! INPUT: the residual |r>, the Ritz's vectors |VRitz>, the eigenvalues lambda
     ! OUTPUT : the correction |delta> to improve the  Ritz's vectors so that to
@@ -262,7 +299,12 @@ contains
     print *,'Delta > ',ndelta,' new vector(s)'
   end subroutine compute_delta
     
-  ! -----------------------------------------------
+  
+  ! --------------------------------------------------------------------------------------
+  !
+  !              COMPUTE_RESIDUAL()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine compute_residual(r,VRitz,S,nvec,cvg,m)
     implicit none
     type(t_mesh)::m
@@ -320,7 +362,12 @@ contains
     end do
   end subroutine Ritz
   
-  ! -----------------------------------------------
+  
+  ! --------------------------------------------------------------------------------------
+  !
+  !              DIAGONALIZATION()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine diagonalization(S,H,N)
     implicit none
     integer :: N
@@ -348,7 +395,12 @@ contains
     deallocate(work)
   end subroutine diagonalization
   
-  ! -----------------------------------------------
+  
+  ! --------------------------------------------------------------------------------------
+  !
+  !              COMPUTE_T()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine compute_T(T,V,nvec,m)
     implicit none
     double precision,allocatable :: V(:,:),T(:,:)
@@ -375,7 +427,12 @@ contains
     end do
   end subroutine compute_T
   
-  ! -----------------------------------------------
+  
+  ! --------------------------------------------------------------------------------------
+  !
+  !              INIT_BASIS_SET()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine init_basis_set(V,nvec,seed,m)
     implicit none
     integer :: nvec,seed
