@@ -8,6 +8,7 @@ program Hbinitio
      integer :: Nx,Ny,Nz,N
      integer,allocatable :: list_neighbors(:,:),n_neighbors(:)
      double precision :: dx,dy,dz,dv
+     double precision :: center(3)
   end type t_mesh
   type(t_mesh) :: mesh
   type t_cvg
@@ -21,9 +22,10 @@ program Hbinitio
   integer,parameter :: seed = 86456
   double precision,allocatable :: V(:,:) ! wavefunctions
   double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
+  double precision,allocatable :: pot_ext(:) ! external potential
   integer :: iloop
   integer :: loopmax
-
+  character (len=1024) :: filecube
   real :: start,inter,end,inter2
   integer :: i
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -36,7 +38,9 @@ program Hbinitio
   nvec=nvecini
   allocate(V(mesh%N,nvec))
   call init_basis_set(V,nvec,seed,mesh)
-
+  allocate(pot_ext(mesh%N))
+  call Vext(mesh,pot_ext)
+  
   open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown')
   write(1,*)
   close(1)
@@ -57,48 +61,66 @@ program Hbinitio
      write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
      write(*,'(A)') 'Main > #######################################'     
 
-     call davidson(nvec,V,mesh,nvecini,iloop,cvg)
+     call davidson(nvec,V,mesh,nvecini,iloop,cvg,pot_ext)
        
   end do
-  
-  call save_cube(V,1,nvecini,mesh)  
+  do i=1,nvecini
+     write(filecube,'(a,i0,a)') 'evec',i,'.cube'
+     call save_cube(V(:,i),filecube,mesh)
+  end do
   deallocate(V)
   deallocate(Sprev)
   deallocate(dS)
+  deallocate(pot_ext)
   call free_mesh(mesh)
   call cpu_time(end)
   if (cvg%ncvg.ge.cvg%nvec_to_cvg) print *,'Main > Job DONE !'
   print '("Main > Total Time = ",e16.6," seconds.")',end-start
-  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 contains
   ! --------------------------------------------------------------------------------------
   !
   !              Vext()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine Vext(m)
+  subroutine Vext(m,pot_ext)
     implicit none
     type(t_mesh) :: m
+    double precision :: pot_ext(:)
+    double precision :: pts(3),rsqr
     
+    character (len=1024) :: filename
     integer :: i,j,k,nn
     do k=1,m%Nz
+       pts(3)=k*m%dz
        do i=1,m%Nx
+          pts(1)=i*m%dx
           do j=1,m%Ny
+             pts(2)=j*m%dy
+             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2+(pts(3)-m%center(3))**2
              nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
-             pot_ext(nn)=0.0
+             pot_ext(nn)=10*rsqr
           end do
        end do
     end do
+    filename='pot_ext.cube'
+    call save_cube(pot_ext,filename,m)
+    !stop
   end subroutine Vext
   ! --------------------------------------------------------------------------------------
   !
   !              DAVIDSON()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine davidson(nvec,V,m,nvecini,iloop,cvg)
+  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot_ext)
     implicit none
     integer :: nvec,nvecini,iloop
-    double precision,allocatable :: V(:,:)
+    double precision,allocatable :: V(:,:),pot_ext(:)
     type(t_mesh) :: m
     type(t_cvg)::cvg
     
@@ -115,7 +137,7 @@ contains
     ! T (reduced matrix) computing
     allocate(T(nvec,nvec))
     !call cpu_time(inter)
-    call compute_T(T,V,nvec,m)
+    call compute_T(T,V,nvec,m,pot_ext)
     !call cpu_time(inter2)
     !call dbg(iloop,inter,inter2,'compute_T')
     
@@ -129,7 +151,7 @@ contains
     dS(:)=S(1:nvecini)-Sprev(:)
     Sprev(:)=S(1:nvecini)
     do i=1,nvecini
-       write(*,'(A,F12.6,A,E12.2,A)')"Main > Eigenvalues: ",S(i),'(',dS(i),')'
+       write(*,'(A,I6,A,F12.6,A,E12.2,A)') 'Main > Eigenvalue(',i,'): ',S(i),'(',dS(i),')'
     end do
     !call cpu_time(inter)
     open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
@@ -149,7 +171,7 @@ contains
     cvg%ncvg=0
     
     !call cpu_time(inter)
-    call compute_residual(residual,VRitz,S,nvec,cvg,m)
+    call compute_residual(residual,VRitz,S,nvec,cvg,m,pot_ext)
     !call cpu_time(inter2)
     !call dbg(iloop,inter,inter2,'residual')
     ! computation of delta
@@ -157,7 +179,7 @@ contains
     delta(:,:)=0.0
     !call cpu_time(inter)
     
-    call compute_delta(delta,residual,S,nvec,cvg,m,ndelta)
+    call compute_delta(delta,residual,S,nvec,cvg,m,ndelta,pot_ext)
     !call cpu_time(inter2) ; call dbg(iloop,inter,inter2,'delta')
     
     deallocate(V)
@@ -206,43 +228,40 @@ contains
     close(1)
   end subroutine dbg
   ! -----------------------------------------------
-  subroutine save_cube(evec,idxmin,idxmax,m)
+  subroutine save_cube(data,filename,m)
     implicit none
-    double precision :: evec(:,:)
+    double precision :: data(:)
     integer :: idxmin,idxmax
     type(t_mesh) :: m
+    character (len=1024) :: filename
     
     character(len=*),parameter :: FMT1='(I5,3F12.6)'
     integer :: i,j,k,nn,ifield
-    integer :: fileid
-    character (len=1024) :: filename
-    do fileid=idxmin,idxmax
-       write(filename,'(a,i0,a)') 'evec',fileid,'.cube'
-       open(unit=1,file=filename,form='formatted',status='unknown')
-       write(1,*) ' Cubefile created from 3d.f90 calculation'
-       write(1,*) ' H. Bulou, October 2018'
-       write(1,FMT1) 1,0.0,0.0,0.0
-       write(1,FMT1) m%Nx,m%dx,0.0,0.0
-       write(1,FMT1) m%Ny,0.0,m%dy,0.0
-       write(1,FMT1) m%Nz,0.0,0.0,m%dz
-       write(1,'(I5,4F12.6)') 1,1.0,0.0,0.0,0.0
-       do k=1,m%Nz
-          ifield=0
-          do i=1,m%Nx
-             do j=1,m%Ny
-                nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx               
-                write(1,'(E13.5)',advance='no') evec(nn,fileid)
-                ifield=ifield+1
-                if (mod(ifield,6).eq.0) then
-                   ifield=0
-                   write(1,*)
-                end if
-             end do
+    
+    open(unit=1,file=filename,form='formatted',status='unknown')
+    write(1,*) ' Cubefile created from Hbinitio.f90 calculation'
+    write(1,*) ' H. Bulou, November 2018'
+    write(1,FMT1) 1,0.0,0.0,0.0
+    write(1,FMT1) m%Nx,m%dx,0.0,0.0
+    write(1,FMT1) m%Ny,0.0,m%dy,0.0
+    write(1,FMT1) m%Nz,0.0,0.0,m%dz
+    write(1,'(I5,4F12.6)') 1,1.0,0.0,0.0,0.0
+    do k=1,m%Nz
+       ifield=0
+       do i=1,m%Nx
+          do j=1,m%Ny
+             nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx               
+             write(1,'(E13.5)',advance='no') data(nn)
+             ifield=ifield+1
+             if (mod(ifield,6).eq.0) then
+                ifield=0
+                write(1,*)
+             end if
           end do
-          write(1,*)
        end do
-       close(1)
+       write(1,*)
     end do
+    close(1)
   end subroutine save_cube
 
   ! --------------------------------------------------------------------------------------
@@ -250,13 +269,13 @@ contains
   !              COMPUTE_DELTA()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine compute_delta(delta,r,lambda,nvec,cvg,m,ndelta)
+  subroutine compute_delta(delta,r,lambda,nvec,cvg,m,ndelta,pot_ext)
     ! INPUT: the residual |r>, the Ritz's vectors |VRitz>, the eigenvalues lambda
     ! OUTPUT : the correction |delta> to improve the  Ritz's vectors so that to
     !          minimize the residual
     implicit none
     type(t_mesh)::m
-    double precision :: lambda(:),r(:,:),delta(:,:)
+    double precision :: lambda(:),r(:,:),delta(:,:),pot_ext(:)
     integer :: nvec,ndelta
     type(t_cvg)::cvg
     
@@ -279,7 +298,7 @@ contains
        if(cvg%list_cvg(i).eq.0) then
           ndelta=ndelta+1
           do j=1,m%N
-             Dinv(j,j)=1.0/((3.0/deltasqr)-lambda(i))
+             Dinv(j,j)=1.0/((3.0/deltasqr+pot_ext(j))-lambda(i))
           end do
           ! see Victor Eijkhout in "Introduction to scientific and technical computing" edited by Willmore et al
           ! Chap 15 Libraries for Linear Algebra
@@ -305,11 +324,11 @@ contains
   !              COMPUTE_RESIDUAL()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine compute_residual(r,VRitz,S,nvec,cvg,m)
+  subroutine compute_residual(r,VRitz,S,nvec,cvg,m,pot_ext)
     implicit none
     type(t_mesh)::m
     integer :: nvec
-    double precision :: r(:,:),VRitz(:,:),S(:)
+    double precision :: r(:,:),VRitz(:,:),S(:),pot_ext(:)
     type(t_cvg) :: cvg
 
     integer :: i,j,k
@@ -325,7 +344,7 @@ contains
     cvg%ncvg=0
     do j=1,nvec
        do i=1,m%N
-          r(i,j)=3.0*VRitz(i,j)/deltasqr
+          r(i,j)=(3.0/deltasqr+pot_ext(i))*VRitz(i,j)
           do k=1,m%n_neighbors(i)
              r(i,j)=r(i,j)-0.5*VRitz(m%list_neighbors(i,k),j)/deltasqr
           end do
@@ -401,9 +420,9 @@ contains
   !              COMPUTE_T()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine compute_T(T,V,nvec,m)
+  subroutine compute_T(T,V,nvec,m,pot_ext)
     implicit none
-    double precision,allocatable :: V(:,:),T(:,:)
+    double precision,allocatable :: V(:,:),T(:,:),pot_ext(:)
     integer :: nvec
     type(t_mesh)::m
     
@@ -417,7 +436,7 @@ contains
        do j=1,nvec ! Tij
           T(i,j)=0.0
           do k=1,m%N
-             acc=3.0*V(k,j)/deltasqr ! the potential will be added here
+             acc=(3.0/deltasqr+pot_ext(k))*V(k,j) ! the potential will be added here
              do l=1,m%n_neighbors(k)
                 acc=acc-0.5*V(m%list_neighbors(k,l),j)/deltasqr
              end do
@@ -552,7 +571,7 @@ contains
     double precision, parameter :: pi=3.1415927
     double precision,parameter :: Lwidth=pi/sqrt(2.0)
  
-    m%Nx=15
+    m%Nx=20
     m%Ny=m%Nx
     m%Nz=m%Nx
     m%N=m%Nx*m%Ny*m%Nz
@@ -562,6 +581,10 @@ contains
     m%dz=Lwidth/(m%Nz+1)
     m%dv=m%dx*m%dy*m%dz
     !m%dv=1.0
+
+    m%center(1)=Lwidth/2
+    m%center(2)=Lwidth/2
+    m%center(3)=Lwidth/2
     
     allocate(m%n_neighbors(m%N))
     allocate(m%list_neighbors(m%N,6)) !
