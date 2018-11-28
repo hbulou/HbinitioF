@@ -3,9 +3,10 @@ LIB=  #-L/usr/lib/x86_64-linux-gnu -lplplotd -lplplotf95d
 INC=
 FC=gfortran
 FCPARA=mpif90
-FCOPT= -fimplicit-none -finit-local-zero -Wunused # -Wall -Wargument-mismatch -Wimplicit-interface
+FCOPT= -fimplicit-none -finit-local-zero -Wunused -fopenmp # -Wall -Wargument-mismatch -Wimplicit-interface
 serial: Hbinitio.f90
-	$(FC) Hbinitio.f90 -o Hbinitio.x -lblas -llapack
+	$(FC) $(FCOPT) Hbinitio.f90 -o Hbinitio.x -lblas -llapack
+#	$(FCPARA) $(FCOPT) Hbinitio.f90 -o Hbinitio.x $(INC) -lblas -llapack -lmpi
 pp: ppHbinitio.f90
 	$(FC) ppHbinitio.f90 -o ppHbinitio.x $(LIB)
 parallel: mpi_Hbinitio.f90

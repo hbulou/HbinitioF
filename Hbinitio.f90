@@ -1,5 +1,40 @@
-program Hbinitio
+module time_tracking
   implicit none
+  type t_time
+     real :: start,end,start_loc,end_loc
+  end type t_time
+contains
+  ! -----------------------------------------------
+  subroutine time_tracking_init(time_spent)
+    implicit none
+    type(t_time)::time_spent
+    call cpu_time(time_spent%start)
+    open(unit=1,file="dbg.dat",form='formatted',status='unknown')
+    write(1,*)
+    close(1)
+  end subroutine time_tracking_init
+  subroutine time_tracking_write(iloop,time_spent,text)
+    integer :: iloop
+    type(t_time)::time_spent
+    character (len=*) :: text
+    open(unit=1,file="dbg.dat",form='formatted',status='unknown',access='append')
+    write(1,'(A50,I4,F12.6,F12.6,F12.6)') text,iloop,time_spent%end_loc,&
+         time_spent%start_loc,time_spent%end_loc-time_spent%start_loc
+    close(1)
+  end subroutine time_tracking_write
+end module time_tracking
+
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+program Hbinitio
+  !$ use OMP_LIB
+  use time_tracking
+  implicit none
+!  include 'mpif.h'
   type t_GramSchmidt
      integer :: nindep
      integer :: ndep ! number of linear dependencies discovered
@@ -18,6 +53,12 @@ program Hbinitio
      integer :: nvec_to_cvg 
   end type t_cvg
   type(t_cvg) :: cvg
+  type(t_time) :: time_spent
+  type t_param
+     logical::restart
+     integer::ieof
+  end type t_param
+  type(t_param)::param
   integer :: nvecini,nvecmax,nvec
   integer,parameter :: seed = 86456
   double precision,allocatable :: V(:,:) ! wavefunctions
@@ -26,32 +67,60 @@ program Hbinitio
   integer :: iloop
   integer :: loopmax
   character (len=1024) :: filecube
-  real :: start,inter,end,inter2
+  character (len=1024)::line
   integer :: i
+
+!  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  
-  call cpu_time(start)
+
+  call time_tracking_init(time_spent)
+
+!  call mpi_init(ierr )
+!  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
+!  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
+
+  param%ieof=0
+  open(unit=1,file='inp',form='formatted')
+  do while(.not.(is_iostat_end(param%ieof)))
+     read(1,*,iostat=param%ieof) line
+     if(line(1:7).eq."restart") then
+        print *,line(1:len_trim(line)),is_iostat_end(param%ieof),param%ieof
+        if(line(index(line,"=")+1:len_trim(line)).eq.'.TRUE.') then
+           param%restart=.TRUE.
+        else
+           param%restart=.FALSE.
+        end if
+     end if
+  end do
+  close(1)
+
+
   call init_mesh(mesh)  
 
-  nvecini=12
-  nvecmax=31
+  nvecini=20
+  nvecmax=41
+!  nvecini=2
   nvec=nvecini
   allocate(V(mesh%N,nvec))
-  call init_basis_set(V,nvec,seed,mesh)
+!  param%restart=.TRUE.
+!  param%restart=.FALSE.
+  if (.not.(param%restart))   then
+     print *,"new calculation"
+     call init_basis_set(V,nvec,seed,mesh)
+  else
+     print *,'restart an old calculation'
+     call read_evectors(V,mesh,nvec)
+  end if
   allocate(pot_ext(mesh%N))
   call Vext(mesh,pot_ext)
   
-  open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown')
-  write(1,*)
-  close(1)
-  open(unit=1,file="dbg.dat",form='formatted',status='unknown')
-  write(1,*)
-  close(1)
+  open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
+
   loopmax=1000
   iloop=1
   cvg%ncvg=0
-  cvg%nvec_to_cvg=7
-  cvg%ETA=1.0e-4
+  cvg%nvec_to_cvg=20
+  cvg%ETA=1.0e-3
   allocate(Sprev(nvecini))
   allocate(dS(nvecini))
   Sprev(:)=0.0
@@ -60,12 +129,12 @@ program Hbinitio
      write(*,'(A)') 'Main > #######################################'     
      write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
      write(*,'(A)') 'Main > #######################################'     
-
-     call davidson(nvec,V,mesh,nvecini,iloop,cvg,pot_ext)
-       
+     call davidson(nvec,V,mesh,nvecini,iloop,cvg,pot_ext,time_spent)
   end do
+  call save_evectors(V,mesh,nvecini)
   do i=1,nvecini
      write(filecube,'(a,i0,a)') 'evec',i,'.cube'
+     call norm(mesh,V(:,i))
      call save_cube(V(:,i),filecube,mesh)
   end do
   deallocate(V)
@@ -73,9 +142,10 @@ program Hbinitio
   deallocate(dS)
   deallocate(pot_ext)
   call free_mesh(mesh)
-  call cpu_time(end)
+  call cpu_time(time_spent%end)
   if (cvg%ncvg.ge.cvg%nvec_to_cvg) print *,'Main > Job DONE !'
-  print '("Main > Total Time = ",e16.6," seconds.")',end-start
+  print '("Main > Total Time = ",e16.6," seconds.")',time_spent%end-time_spent%start
+!  call mpi_finalize(ierr)
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -83,6 +153,51 @@ program Hbinitio
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 contains
+  ! --------------------------------------------------------------------------------------
+  !
+  !              save_evectors()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine save_evectors(V,m,nvecini)
+    implicit none
+    type(t_mesh)::m
+    double precision :: V(:,:)
+    integer::nvecini,i,j
+    open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+    do i=1,m%N
+       write(1,*) (V(i,j),j=1,nvecini)
+    end do
+    close(1)
+  end subroutine save_evectors
+  ! --------------------------------------------------------------------------------------
+  !
+  !              read_evectors()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine read_evectors(V,m,nvecini)
+    implicit none
+    type(t_mesh)::m
+    double precision :: V(:,:)
+    integer::nvecini,i,j
+    open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+    do i=1,m%N
+       read(1,*) (V(i,j),j=1,nvecini)
+    end do
+    close(1)
+  end subroutine read_evectors
+  ! --------------------------------------------------------------------------------------
+  !
+  !              norm()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine  norm(m,evec) 
+    implicit none
+    double precision :: evec(:),normloc
+    double precision, external :: ddot
+    type(t_mesh)::m
+    normloc=sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
+    call dscal(m%N,normloc,evec(:),1)
+  end subroutine norm
   ! --------------------------------------------------------------------------------------
   !
   !              Vext()
@@ -117,12 +232,13 @@ contains
   !              DAVIDSON()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot_ext)
+  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot_ext,time_spent)
     implicit none
     integer :: nvec,nvecini,iloop
     double precision,allocatable :: V(:,:),pot_ext(:)
     type(t_mesh) :: m
     type(t_cvg)::cvg
+    type(t_time)::time_spent
     
     double precision,allocatable :: S(:) ! eigenvalues
     double precision,allocatable :: T(:,:) ! reduced matrix T
@@ -136,17 +252,19 @@ contains
     type(t_GramSchmidt)::GS
     ! T (reduced matrix) computing
     allocate(T(nvec,nvec))
-    !call cpu_time(inter)
+    call cpu_time(time_spent%start_loc)
     call compute_T(T,V,nvec,m,pot_ext)
-    !call cpu_time(inter2)
-    !call dbg(iloop,inter,inter2,'compute_T')
+    call cpu_time(time_spent%end_loc)
+    call time_tracking_write(iloop,time_spent,'Davidson -> compute_T')
     
     ! Diagonatilzation of T
     allocate(S(nvec))
-    !call cpu_time(inter)
+
+    call cpu_time(time_spent%start_loc)
     call diagonalization(S,T,nvec)
-    !call cpu_time(inter2)
-    !call dbg(iloop,inter,inter2,'Diagonalization')
+    call cpu_time(time_spent%end_loc)
+    call time_tracking_write(iloop,time_spent,'Davidson -> Diagonalization')
+
     
     dS(:)=S(1:nvecini)-Sprev(:)
     Sprev(:)=S(1:nvecini)
@@ -155,14 +273,16 @@ contains
     end do
     !call cpu_time(inter)
     open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
-    write(1,*) inter,iloop,S(1:nvecini)
+    write(1,*) iloop,S(1:nvecini)
     close(1)
     ! computation of the Ritz's vectors
     allocate(VRitz(m%N,nvec))
-    !call cpu_time(inter)
+
+    call cpu_time(time_spent%start_loc)
     call Ritz(VRitz,V,T,nvec)
-    !call cpu_time(inter2)
-    !call dbg(iloop,inter,inter2,'Ritz')
+    call cpu_time(time_spent%end_loc)
+    call time_tracking_write(iloop,time_spent,'Davidson -> Diagonalization')
+
     
     ! computation of residual
     allocate(residual(m%N,nvec))
@@ -170,17 +290,22 @@ contains
     cvg%list_cvg(:)=0
     cvg%ncvg=0
     
-    !call cpu_time(inter)
+
+    call cpu_time(time_spent%start_loc)
     call compute_residual(residual,VRitz,S,nvec,cvg,m,pot_ext)
-    !call cpu_time(inter2)
-    !call dbg(iloop,inter,inter2,'residual')
+    call cpu_time(time_spent%end_loc)
+    call time_tracking_write(iloop,time_spent,'Davidson -> Residual')
+
     ! computation of delta
     allocate(delta(m%N,nvec))
     delta(:,:)=0.0
     !call cpu_time(inter)
-    
+
+    call cpu_time(time_spent%start_loc)
     call compute_delta(delta,residual,S,nvec,cvg,m,ndelta,pot_ext)
-    !call cpu_time(inter2) ; call dbg(iloop,inter,inter2,'delta')
+    call cpu_time(time_spent%end_loc)
+    call time_tracking_write(iloop,time_spent,'Davidson -> Delta')
+
     
     deallocate(V)
     allocate(V(m%N,nvec+ndelta))
@@ -218,20 +343,15 @@ contains
     deallocate(Vnew)
     deallocate(cvg%list_cvg)
   end subroutine davidson
-  ! -----------------------------------------------
-  subroutine dbg(iloop,inter,inter2,text)
-    real :: inter,inter2
-    integer :: iloop
-    character (len=*) :: text
-    open(unit=1,file="dbg.dat",form='formatted',status='unknown',access='append')
-    write(1,'(A20,I4,F12.6,F12.6,F12.6)') text,iloop,inter,inter2,inter2-inter
-    close(1)
-  end subroutine dbg
-  ! -----------------------------------------------
+  ! --------------------------------------------------------------------------------------
+  !
+  !              SAVE_CUBE()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine save_cube(data,filename,m)
     implicit none
     double precision :: data(:)
-    integer :: idxmin,idxmax
+!    integer :: idxmin,idxmax
     type(t_mesh) :: m
     character (len=1024) :: filename
     
@@ -281,40 +401,38 @@ contains
     
     double precision, external :: ddot
     double precision, parameter::alpha=1.0,beta=0.0
-    double precision, allocatable :: Dinv(:,:),norm
-    integer :: i,j,k,kk
+    double precision, allocatable :: normloc
+!    double precision, allocatable :: Dinv(:,:)
+    integer :: i,j
     double precision :: deltasqr
 
     deltasqr=m%dx**2
     print *,'Delta > ---------------------'
     print *,'Delta > --- compute_delta ---'
     print *,'Delta > ---------------------'
-    delta(:,:)=0.0
-    allocate(Dinv(m%N,m%N))
-    Dinv(:,:)=0.0
+    !delta(:,:)=0.0
+   ! allocate(Dinv(m%N,m%N))
+  !  Dinv(:,:)=0.0
     ndelta=0
     do i=1,nvec
-       
        if(cvg%list_cvg(i).eq.0) then
           ndelta=ndelta+1
           do j=1,m%N
-             Dinv(j,j)=1.0/((3.0/deltasqr+pot_ext(j))-lambda(i))
+             delta(j,ndelta)=r(j,ndelta)/((3.0/deltasqr+pot_ext(j))-lambda(i))
+!             Dinv(j,j)=1.0/((3.0/deltasqr+pot_ext(j))-lambda(i))
           end do
           ! see Victor Eijkhout in "Introduction to scientific and technical computing" edited by Willmore et al
           ! Chap 15 Libraries for Linear Algebra
           ! to get a comprehensive way to use dgemv
-          call dgemv('N',m%N,m%N,alpha,Dinv,m%N,r(:,ndelta),1,beta,delta(:,ndelta),1)
+ !         call dgemv('N',m%N,m%N,alpha,Dinv,m%N,r(:,ndelta),1,beta,delta(:,ndelta),1)
           !norm=sqrt(ddot(m%N,delta(:,i),1,delta(:,i),1))
           !write(*, '(A10,I4,A2,E12.6)',advance='no') ' Delta > delta(',i,')=',norm
           !delta(:,ndelta)=delta(:,ndelta)+VRitz(:,ndelta)
-          norm=1.0/sqrt(ddot(m%N,delta(:,ndelta),1,delta(:,ndelta),1))
-
-          call dscal(m%N,norm,delta(:,ndelta),1)
-
+          normloc=1.0/sqrt(ddot(m%N,delta(:,ndelta),1,delta(:,ndelta),1))
+          call dscal(m%N,normloc,delta(:,ndelta),1)
        end if
-       
     end do
-    deallocate(Dinv)
+    !deallocate(Dinv)
     print *,'Delta > ',ndelta,' new vector(s)'
   end subroutine compute_delta
     
@@ -332,7 +450,7 @@ contains
     type(t_cvg) :: cvg
 
     integer :: i,j,k
-    double precision :: norm
+    double precision :: normloc
     double precision, external :: ddot        
     double precision :: deltasqr
 
@@ -350,9 +468,9 @@ contains
           end do
           r(i,j)=r(i,j)-S(j)*VRitz(i,j)
        end do
-       norm=ddot(m%N,r(:,j),1,r(:,j),1)
-       write(*,'(A,I4,A,E12.4,A,E12.4)',advance='no') 'Residual > r(',j,')= ',norm,'/',cvg%ETA
-       if (norm.lt.cvg%ETA) then
+       normloc=ddot(m%N,r(:,j),1,r(:,j),1)
+       write(*,'(A,I4,A,E12.4,A,E12.4)',advance='no') 'Residual > r(',j,')= ',normloc,'/',cvg%ETA
+       if (normloc.lt.cvg%ETA) then
           cvg%ncvg=cvg%ncvg+1
           cvg%list_cvg(j)=1
           write(*,*) '--> converged'
@@ -363,7 +481,11 @@ contains
     end do
   end subroutine compute_residual
   
-  ! -----------------------------------------------
+  ! --------------------------------------------------------------------------------------
+  !
+  !              RITZ()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine Ritz(Vout,Vin,y,nvec)
     implicit none
     double precision :: Vin(:,:),Vout(:,:),y(:,:)
@@ -429,21 +551,29 @@ contains
     integer :: i,j,k,l
     double precision :: deltasqr,acc
     double precision, parameter::alpha=0.0
-    double precision::beta
+!    double precision::beta
     
     deltasqr=m%dx**2
-    do i=1,nvec
-       do j=1,nvec ! Tij
+    !$OMP PARALLEL private(acc) 
+    !$OMP DO 
+    do j=1,nvec
+       do i=1,nvec ! Tij
           T(i,j)=0.0
           do k=1,m%N
              acc=(3.0/deltasqr+pot_ext(k))*V(k,j) ! the potential will be added here
              do l=1,m%n_neighbors(k)
                 acc=acc-0.5*V(m%list_neighbors(k,l),j)/deltasqr
+!                print *, omp_get_thread_num(),i,j,k,l
              end do
              T(i,j)=T(i,j)+V(k,i)*acc
+!             print *,' -> ',omp_get_thread_num(),i,j,T(i,j)
           end do
+!          print *,omp_get_thread_num(),i,j,T(i,j)
        end do
     end do
+    !$OMP END DO
+    !$OMP END PARALLEL
+!    stop
   end subroutine compute_T
   
   
@@ -459,7 +589,7 @@ contains
     type(t_mesh)::m
 
     double precision, external :: ddot
-    double precision ::norm
+    double precision ::normloc
     integer :: i,j
     double precision,allocatable :: Vdump(:,:)
     type(t_GramSchmidt) :: GS
@@ -472,9 +602,9 @@ contains
        end do
     end do
     do i=1,nvec
-       norm=ddot(m%N,Vdump(:,i),1,Vdump(:,i),1)
-       norm=1.0/sqrt(norm)
-       call dscal(m%N,norm,Vdump(:,i),1)
+       normloc=ddot(m%N,Vdump(:,i),1,Vdump(:,i),1)
+       normloc=1.0/sqrt(normloc)
+       call dscal(m%N,normloc,Vdump(:,i),1)
     end do
     GS%nindep=1
     call GramSchmidt(V,Vdump,nvec,m,GS)
@@ -490,10 +620,10 @@ contains
     type(t_mesh)::m
     type(t_GramSchmidt) :: GS
     
-    integer :: i,k,j,i0
+    integer :: i,k,i0
     double precision, parameter :: ETA=1.0e-6
     double precision,allocatable :: a(:)
-    double precision :: norm
+    double precision :: normloc
     double precision, external :: ddot
 
     allocate(a(nvec))
@@ -515,13 +645,13 @@ contains
           call daxpy(m%N,-a(k),Vout(:,k),1,Vout(:,GS%nindep+1),1)
        end do
        ! now wre compute the norm of V(:,nindep+1)
-       norm=sqrt(ddot(m%N,Vout(:,GS%nindep+1),1,Vout(:,GS%nindep+1),1))
+       normloc=sqrt(ddot(m%N,Vout(:,GS%nindep+1),1,Vout(:,GS%nindep+1),1))
        !print *,'GS > norm(',i,')=',norm
-       if (norm.le.ETA) then
+       if (normloc.le.ETA) then
           GS%ndep=GS%ndep+1 ! V(:,nindep+1) is not linearly inependent
        else
-          norm=1.0/norm
-          call dscal(m%N,norm,Vout(:,GS%nindep+1),1)
+          normloc=1.0/normloc
+          call dscal(m%N,normloc,Vout(:,GS%nindep+1),1)
           !              do k=2,icur
           !                 print *,'<U',k-1,'|U',i,'>=',ddot(N,V(:,k-1),1,V(:,icur),1)
           !              end do
@@ -544,7 +674,7 @@ contains
     type(t_mesh)::m
 
     double precision, parameter :: ETA=1.0e-6
-    integer :: i,j,k,nfail
+    integer :: i,j,nfail
     double precision :: pscal
     double precision, external :: ddot
     nfail=-nvec
@@ -571,7 +701,8 @@ contains
     double precision, parameter :: pi=3.1415927
     double precision,parameter :: Lwidth=pi/sqrt(2.0)
  
-    m%Nx=20
+    m%Nx=30
+!    m%Nx=5
     m%Ny=m%Nx
     m%Nz=m%Nx
     m%N=m%Nx*m%Ny*m%Nz
