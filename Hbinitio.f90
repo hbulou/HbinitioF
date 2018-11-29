@@ -57,15 +57,20 @@ program Hbinitio
   type t_param
      logical::restart
      integer::ieof
+     integer::loopmax
+     integer::nvecini
+     integer::nvecmax
+     integer::Nx
+     integer::nvec_to_cvg
+     double precision :: ETA
   end type t_param
   type(t_param)::param
-  integer :: nvecini,nvecmax,nvec
+  integer :: nvec
   integer,parameter :: seed = 86456
   double precision,allocatable :: V(:,:) ! wavefunctions
   double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
   double precision,allocatable :: pot_ext(:) ! external potential
   integer :: iloop
-  integer :: loopmax
   character (len=1024) :: filecube
   character (len=1024)::line
   integer :: i
@@ -79,28 +84,11 @@ program Hbinitio
 !  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
 !  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
 
-  param%ieof=0
-  open(unit=1,file='inp',form='formatted')
-  do while(.not.(is_iostat_end(param%ieof)))
-     read(1,*,iostat=param%ieof) line
-     if(line(1:7).eq."restart") then
-        print *,line(1:len_trim(line)),is_iostat_end(param%ieof),param%ieof
-        if(line(index(line,"=")+1:len_trim(line)).eq.'.TRUE.') then
-           param%restart=.TRUE.
-        else
-           param%restart=.FALSE.
-        end if
-     end if
-  end do
-  close(1)
+  call read_param(param)
+  call init_mesh(mesh,param)  
 
-
-  call init_mesh(mesh)  
-
-  nvecini=20
-  nvecmax=41
 !  nvecini=2
-  nvec=nvecini
+  nvec=param%nvecini
   allocate(V(mesh%N,nvec))
 !  param%restart=.TRUE.
 !  param%restart=.FALSE.
@@ -115,24 +103,23 @@ program Hbinitio
   call Vext(mesh,pot_ext)
   
   open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
-
-  loopmax=1000
+  
   iloop=1
   cvg%ncvg=0
-  cvg%nvec_to_cvg=20
-  cvg%ETA=1.0e-3
-  allocate(Sprev(nvecini))
-  allocate(dS(nvecini))
+  cvg%nvec_to_cvg=param%nvec_to_cvg
+  cvg%ETA=param%ETA
+  allocate(Sprev(param%nvecini))
+  allocate(dS(param%nvecini))
   Sprev(:)=0.0
   dS(:)=0.0
-  do while((iloop.le.loopmax).and.(cvg%ncvg.lt.cvg%nvec_to_cvg))
+  do while((iloop.le.param%loopmax).and.(cvg%ncvg.lt.cvg%nvec_to_cvg))
      write(*,'(A)') 'Main > #######################################'     
      write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
      write(*,'(A)') 'Main > #######################################'     
-     call davidson(nvec,V,mesh,nvecini,iloop,cvg,pot_ext,time_spent)
+     call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot_ext,time_spent)
   end do
-  call save_evectors(V,mesh,nvecini)
-  do i=1,nvecini
+  call save_evectors(V,mesh,param%nvecini)
+  do i=1,param%nvecini
      write(filecube,'(a,i0,a)') 'evec',i,'.cube'
      call norm(mesh,V(:,i))
      call save_cube(V(:,i),filecube,mesh)
@@ -153,6 +140,70 @@ program Hbinitio
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 contains
+  ! --------------------------------------------------------------------------------------
+  !
+  !              read_param()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine read_param(param)
+    implicit none
+    type(t_param)::param
+    integer::lline,eqidx
+    
+    param%ieof=0
+    param%loopmax=1000
+    param%restart=.FALSE.
+    param%nvecini=20
+    param%nvecmax=41
+    param%Nx=30
+    param%nvec_to_cvg=20
+    param%ETA=1.0e-3
+
+    open(unit=1,file='inp',form='formatted')
+    do while(.not.(is_iostat_end(param%ieof)))
+       read(1,*,iostat=param%ieof) line
+       lline=len_trim(line)
+       eqidx=index(line,"=")
+       print *,'###',eqidx,lline
+       if(line(1:eqidx-1).eq."restart") then
+          if(line(eqidx+1:lline).eq.'.TRUE.') then
+             param%restart=.TRUE.
+          else
+             param%restart=.FALSE.
+          end if
+       end if
+       if(line(1:eqidx-1).eq."loopmax") then
+          read(line(eqidx+1:lline),*) param%loopmax
+       end if
+       if(line(1:eqidx-1).eq."nvecini") then
+          read(line(eqidx+1:lline),*) param%nvecini
+       end if
+       if(line(1:eqidx-1).eq."nvecmax") then
+          read(line(eqidx+1:lline),*) param%nvecmax
+       end if
+       if(line(1:eqidx-1).eq."Nx") then
+          read(line(eqidx+1:lline),*) param%nx
+       end if
+       if(line(1:eqidx-1).eq."ETA") then
+          read(line(eqidx+1:lline),*) param%ETA
+       end if
+       if(line(1:eqidx-1).eq."nvec_to_cvg") then
+          read(line(eqidx+1:lline),*) param%nvec_to_cvg
+       end if
+       line=''
+    end do
+    close(1)
+
+
+    print *,'#restart=',param%restart
+    print *,'#loopmax=',param%loopmax
+    print *,'#nvecini=',param%nvecini
+    print *,'#nvecmax=',param%nvecmax
+    print *,'#Nx=',param%nx
+    print *,'#ETA=',param%ETA
+    print *,'#nvec_to_cvg=',param%nvec_to_cvg
+    
+  end subroutine read_param
   ! --------------------------------------------------------------------------------------
   !
   !              save_evectors()
@@ -323,7 +374,7 @@ contains
     print *,'Main > ',GS%ndep,newnvec
     
     deallocate(V)
-    if(newnvec.le.nvecmax) then
+    if(newnvec.le.param%nvecmax) then
        nvec=newnvec
     else
        print *,'Main > restart from nvecini'
@@ -695,13 +746,14 @@ contains
   
 
   ! -----------------------------------------------
-  subroutine init_mesh(m)
+  subroutine init_mesh(m,param)
     implicit none
     type(t_mesh)::m
+    type(t_param)::param
     double precision, parameter :: pi=3.1415927
     double precision,parameter :: Lwidth=pi/sqrt(2.0)
  
-    m%Nx=30
+    m%Nx=param%Nx
 !    m%Nx=5
     m%Ny=m%Nx
     m%Nz=m%Nx
