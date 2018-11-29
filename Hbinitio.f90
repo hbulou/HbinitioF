@@ -63,6 +63,7 @@ program Hbinitio
      integer::Nx
      integer::nvec_to_cvg
      double precision :: ETA
+     double precision::box_width
   end type t_param
   type(t_param)::param
   integer :: nvec
@@ -149,7 +150,8 @@ contains
     implicit none
     type(t_param)::param
     integer::lline,eqidx
-    
+    double precision, parameter :: pi=3.1415927
+
     param%ieof=0
     param%loopmax=1000
     param%restart=.FALSE.
@@ -158,7 +160,7 @@ contains
     param%Nx=30
     param%nvec_to_cvg=20
     param%ETA=1.0e-3
-
+    param%box_width=pi/sqrt(2.0)
     open(unit=1,file='inp',form='formatted')
     do while(.not.(is_iostat_end(param%ieof)))
        read(1,*,iostat=param%ieof) line
@@ -190,6 +192,9 @@ contains
        if(line(1:eqidx-1).eq."nvec_to_cvg") then
           read(line(eqidx+1:lline),*) param%nvec_to_cvg
        end if
+       if(line(1:eqidx-1).eq."box_width") then
+          read(line(eqidx+1:lline),*) param%box_width
+       end if
        line=''
     end do
     close(1)
@@ -199,10 +204,12 @@ contains
     print *,'#loopmax=',param%loopmax
     print *,'#nvecini=',param%nvecini
     print *,'#nvecmax=',param%nvecmax
-    print *,'#Nx=',param%nx
     print *,'#ETA=',param%ETA
     print *,'#nvec_to_cvg=',param%nvec_to_cvg
-    
+    print *,'#box_width=',param%box_width
+    print *,'#Nx=',param%nx
+    print *,'#dh=',param%box_width/(param%Nx+1)
+
   end subroutine read_param
   ! --------------------------------------------------------------------------------------
   !
@@ -750,9 +757,9 @@ contains
     implicit none
     type(t_mesh)::m
     type(t_param)::param
-    double precision, parameter :: pi=3.1415927
-    double precision,parameter :: Lwidth=pi/sqrt(2.0)
- 
+    double precision:: Lwidth 
+
+    Lwidth=param%box_width
     m%Nx=param%Nx
 !    m%Nx=5
     m%Ny=m%Nx
