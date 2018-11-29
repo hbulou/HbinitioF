@@ -1,0 +1,8 @@
+restart=.FALSE.
+loopmax=2000
+nvecini=10
+nvecmax=21
+Nx=30
+nvec_to_cvg=2
+ETA=1.0e-3
+box_width=10.0
