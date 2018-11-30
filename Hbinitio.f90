@@ -76,7 +76,7 @@ program Hbinitio
   integer :: iloop
   character (len=1024) :: filecube
   character (len=1024)::line
-  integer :: i,j
+  integer :: i,j,k
 
   !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -121,19 +121,27 @@ program Hbinitio
      write(*,'(A)') 'Main > #######################################'     
      call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot_ext,time_spent)
   end do
+
   call save_evectors(V,mesh,param%nvecini)
   do i=1,param%nvecini
      call norm(mesh,V(:,i))
      if(mesh%dim.eq.3) then
         write(filecube,'(a,i0,a)') 'evec',i,'.cube'
         call save_cube_3D(V(:,i),filecube,mesh)
+     else if(mesh%dim.eq.2) then
+        write(filecube,'(a,i0,a)') 'evec',i,'.dat'
+        open(unit=1,file=filecube,form='formatted',status='unknown')
+        do j=1,mesh%Nx
+           do k=1,mesh%Ny
+              write(1,*) j*mesh%dx,k*mesh%dy,V(j+(k-1)*mesh%Nx,i)
+           end do
+        end do
+        close(1)
      else if(mesh%dim.eq.1) then
-         write(filecube,'(a,i0,a)') 'evec',i,'.dat'
-!        print *,filecube
+        write(filecube,'(a,i0,a)') 'evec',i,'.dat'
         open(unit=1,file=filecube,form='formatted',status='unknown')
         do j=1,mesh%N
            write(1,*) j*mesh%dx,V(j,i)
-!           print *, j*mesh%dx,V(j,i)
         end do
         close(1)
      else
@@ -141,6 +149,8 @@ program Hbinitio
        stop
     end if
   end do
+
+
   deallocate(V)
   deallocate(Sprev)
   deallocate(dS)
@@ -310,12 +320,12 @@ contains
     type(t_mesh)::m
     if(m%dim.eq.3) then
        normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
+    else if(m%dim.eq.2) then
+       normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
     else    if(m%dim.eq.1) then
 !       normloc=1.0/sqrt(trapz(m,evec))
 !       print *,normloc,sqrt(trapz(m,evec))
        normloc=1.0/sqrt(simpson(m,evec))
-!       print *,normloc,sqrt(simpson(m,evec))
-
     else
        print *,' STOP in norm(): dimension=',m%dim,' not yet implemented!'
        stop
@@ -344,12 +354,25 @@ contains
                 pts(2)=j*m%dy
                 rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2+(pts(3)-m%center(3))**2
                 nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
-                pot_ext(nn)=10*rsqr
+                pot_ext(nn)=0.5*1.0*rsqr
              end do
           end do
        end do
        filename='pot_ext.cube'
        call save_cube_3D(pot_ext,filename,m)
+    else if(m%dim.eq.2) then
+       open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
+       do i=1,m%Nx
+          pts(1)=i*m%dx
+          do j=1,m%Ny
+             pts(2)=j*m%dy
+             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2
+             nn=j+(i-1)*m%Ny
+             pot_ext(nn)=0.5*1.0*rsqr
+             write(1,*) pts(1),pts(2),pot_ext(nn)
+          end do
+       end do
+       close(1)
     else    if(m%dim.eq.1) then
        open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
        do i=1,m%Nx
@@ -847,6 +870,11 @@ contains
        m%Nz=m%Nx
        m%dy=Lwidth/(m%Ny+1)
        m%dz=Lwidth/(m%Nz+1)
+    else if(m%dim.eq.2) then
+       m%Ny=m%Nx
+       m%Nz=1
+       m%dy=Lwidth/(m%Ny+1)
+       m%dz=1.0
     else   if(m%dim.eq.1) then
        m%Ny=1
        m%Nz=1
@@ -858,8 +886,6 @@ contains
     end if
     m%N=m%Nx*m%Ny*m%Nz
     m%dv=m%dx*m%dy*m%dz
-
-
     m%center(1)=Lwidth/2
     m%center(2)=Lwidth/2
     m%center(3)=Lwidth/2
@@ -918,6 +944,28 @@ contains
                    m%list_neighbors(nn,m%n_neighbors(nn))=nn+1
                 end if
              end do
+          end do
+       end do
+    else    if(m%dim.eq.2) then
+       do i=1,m%Nx
+          do j=1,m%Ny
+             nn=j+(i-1)*m%Ny
+             if (i>1) then 
+                m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Ny
+             end if
+             if (i<m%Nx) then 
+                m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Ny
+             end if
+             if (j>1) then 
+                m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                m%list_neighbors(nn,m%n_neighbors(nn))=nn-1
+             end if
+             if (j<m%Ny) then 
+                m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                m%list_neighbors(nn,m%n_neighbors(nn))=nn+1
+             end if
           end do
        end do
     else if(m%dim.eq.1) then
