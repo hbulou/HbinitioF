@@ -44,13 +44,14 @@ program Hbinitio
      integer,allocatable :: list_neighbors(:,:),n_neighbors(:)
      double precision :: dx,dy,dz,dv
      double precision :: center(3)
+     integer :: dim
   end type t_mesh
   type(t_mesh) :: mesh
   type t_cvg
      integer,allocatable:: list_cvg(:)
      integer :: ncvg
      double precision :: ETA
-     integer :: nvec_to_cvg 
+     integer :: nvec_to_cvg
   end type t_cvg
   type(t_cvg) :: cvg
   type(t_time) :: time_spent
@@ -64,6 +65,7 @@ program Hbinitio
      integer::nvec_to_cvg
      double precision :: ETA
      double precision::box_width
+     integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
   end type t_param
   type(t_param)::param
   integer :: nvec
@@ -74,9 +76,9 @@ program Hbinitio
   integer :: iloop
   character (len=1024) :: filecube
   character (len=1024)::line
-  integer :: i
+  integer :: i,j
 
-!  integer::ierr,my_id,num_procs
+  !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   call time_tracking_init(time_spent)
@@ -102,7 +104,7 @@ program Hbinitio
   end if
   allocate(pot_ext(mesh%N))
   call Vext(mesh,pot_ext)
-  
+
   open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
   
   iloop=1
@@ -121,9 +123,23 @@ program Hbinitio
   end do
   call save_evectors(V,mesh,param%nvecini)
   do i=1,param%nvecini
-     write(filecube,'(a,i0,a)') 'evec',i,'.cube'
      call norm(mesh,V(:,i))
-     call save_cube(V(:,i),filecube,mesh)
+     if(mesh%dim.eq.3) then
+        write(filecube,'(a,i0,a)') 'evec',i,'.cube'
+        call save_cube_3D(V(:,i),filecube,mesh)
+     else if(mesh%dim.eq.1) then
+         write(filecube,'(a,i0,a)') 'evec',i,'.dat'
+!        print *,filecube
+        open(unit=1,file=filecube,form='formatted',status='unknown')
+        do j=1,mesh%N
+           write(1,*) j*mesh%dx,V(j,i)
+!           print *, j*mesh%dx,V(j,i)
+        end do
+        close(1)
+     else
+       print *,' STOP in main(): dimension=',mesh%dim,' not yet implemented!'
+       stop
+    end if
   end do
   deallocate(V)
   deallocate(Sprev)
@@ -160,6 +176,7 @@ contains
     param%Nx=30
     param%nvec_to_cvg=20
     param%ETA=1.0e-3
+    param%dim=1
     param%box_width=pi/sqrt(2.0)
     open(unit=1,file='inp',form='formatted')
     do while(.not.(is_iostat_end(param%ieof)))
@@ -195,6 +212,9 @@ contains
        if(line(1:eqidx-1).eq."box_width") then
           read(line(eqidx+1:lline),*) param%box_width
        end if
+       if(line(1:eqidx-1).eq."dimension") then
+          read(line(eqidx+1:lline),*) param%dim
+       end if
        line=''
     end do
     close(1)
@@ -209,6 +229,7 @@ contains
     print *,'#box_width=',param%box_width
     print *,'#Nx=',param%nx
     print *,'#dh=',param%box_width/(param%Nx+1)
+    print *,'#Dimension of the mesh=',param%dim
 
   end subroutine read_param
   ! --------------------------------------------------------------------------------------
@@ -245,6 +266,40 @@ contains
   end subroutine read_evectors
   ! --------------------------------------------------------------------------------------
   !
+  !              simpson()
+  !
+  ! --------------------------------------------------------------------------------------
+  function  simpson(m,f)
+    implicit none
+    type (t_mesh)::m
+    double precision::simpson
+    double precision :: f(:)
+    integer::i
+    simpson=0.0
+    do i=1,m%N-2,2
+       simpson=simpson+f(i)*f(i)+4*f(i+1)*f(i+1)+f(i+2)*f(i+2)
+    end do
+    simpson=m%dv*simpson/3.0
+  end function simpson
+  ! --------------------------------------------------------------------------------------
+  !
+  !              trapz()
+  !
+  ! --------------------------------------------------------------------------------------
+  function  trapz(m,f)
+    implicit none
+    type (t_mesh)::m
+    double precision::trapz
+    double precision :: f(:)
+    integer::i
+     trapz=0.0
+    do i=1,m%N-1
+        trapz=trapz+f(i)*f(i)+f(i+1)*f(i+1)
+    end do
+    trapz=0.5*m%dv*trapz
+  end function trapz
+  ! --------------------------------------------------------------------------------------
+  !
   !              norm()
   !
   ! --------------------------------------------------------------------------------------
@@ -253,7 +308,18 @@ contains
     double precision :: evec(:),normloc
     double precision, external :: ddot
     type(t_mesh)::m
-    normloc=sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
+    if(m%dim.eq.3) then
+       normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
+    else    if(m%dim.eq.1) then
+!       normloc=1.0/sqrt(trapz(m,evec))
+!       print *,normloc,sqrt(trapz(m,evec))
+       normloc=1.0/sqrt(simpson(m,evec))
+!       print *,normloc,sqrt(simpson(m,evec))
+
+    else
+       print *,' STOP in norm(): dimension=',m%dim,' not yet implemented!'
+       stop
+    end if
     call dscal(m%N,normloc,evec(:),1)
   end subroutine norm
   ! --------------------------------------------------------------------------------------
@@ -269,21 +335,35 @@ contains
     
     character (len=1024) :: filename
     integer :: i,j,k,nn
-    do k=1,m%Nz
-       pts(3)=k*m%dz
-       do i=1,m%Nx
-          pts(1)=i*m%dx
-          do j=1,m%Ny
-             pts(2)=j*m%dy
-             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2+(pts(3)-m%center(3))**2
-             nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
-             pot_ext(nn)=10*rsqr
+    if(m%dim.eq.3) then
+       do k=1,m%Nz
+          pts(3)=k*m%dz
+          do i=1,m%Nx
+             pts(1)=i*m%dx
+             do j=1,m%Ny
+                pts(2)=j*m%dy
+                rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2+(pts(3)-m%center(3))**2
+                nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
+                pot_ext(nn)=10*rsqr
+             end do
           end do
        end do
-    end do
-    filename='pot_ext.cube'
-    call save_cube(pot_ext,filename,m)
-    !stop
+       filename='pot_ext.cube'
+       call save_cube_3D(pot_ext,filename,m)
+    else    if(m%dim.eq.1) then
+       open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
+       do i=1,m%Nx
+          pts(1)=i*m%dx
+          rsqr=(pts(1)-m%center(1))**2
+          pot_ext(i)=.5*1.0*rsqr
+          write(1,*) pts(1),pot_ext(i)
+       end do
+       close(1)
+    else
+       print *,' STOP in Vext(): dimension=',m%dim,' not yet implemented!'
+       stop
+    end if
+       !stop
   end subroutine Vext
   ! --------------------------------------------------------------------------------------
   !
@@ -406,7 +486,7 @@ contains
   !              SAVE_CUBE()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine save_cube(data,filename,m)
+  subroutine save_cube_3D(data,filename,m)
     implicit none
     double precision :: data(:)
 !    integer :: idxmin,idxmax
@@ -440,7 +520,7 @@ contains
        write(1,*)
     end do
     close(1)
-  end subroutine save_cube
+  end subroutine save_cube_3D
 
   ! --------------------------------------------------------------------------------------
   !
@@ -476,7 +556,7 @@ contains
        if(cvg%list_cvg(i).eq.0) then
           ndelta=ndelta+1
           do j=1,m%N
-             delta(j,ndelta)=r(j,ndelta)/((3.0/deltasqr+pot_ext(j))-lambda(i))
+             delta(j,ndelta)=r(j,ndelta)/((m%dim/deltasqr+pot_ext(j))-lambda(i))
 !             Dinv(j,j)=1.0/((3.0/deltasqr+pot_ext(j))-lambda(i))
           end do
           ! see Victor Eijkhout in "Introduction to scientific and technical computing" edited by Willmore et al
@@ -520,7 +600,7 @@ contains
     cvg%ncvg=0
     do j=1,nvec
        do i=1,m%N
-          r(i,j)=(3.0/deltasqr+pot_ext(i))*VRitz(i,j)
+          r(i,j)=(m%dim/deltasqr+pot_ext(i))*VRitz(i,j)
           do k=1,m%n_neighbors(i)
              r(i,j)=r(i,j)-0.5*VRitz(m%list_neighbors(i,k),j)/deltasqr
           end do
@@ -610,7 +690,6 @@ contains
     double precision :: deltasqr,acc
     double precision, parameter::alpha=0.0
 !    double precision::beta
-    
     deltasqr=m%dx**2
     !$OMP PARALLEL private(acc) 
     !$OMP DO 
@@ -618,7 +697,7 @@ contains
        do i=1,nvec ! Tij
           T(i,j)=0.0
           do k=1,m%N
-             acc=(3.0/deltasqr+pot_ext(k))*V(k,j) ! the potential will be added here
+             acc=(m%dim/deltasqr+pot_ext(k))*V(k,j) ! the potential will be added here
              do l=1,m%n_neighbors(k)
                 acc=acc-0.5*V(m%list_neighbors(k,l),j)/deltasqr
 !                print *, omp_get_thread_num(),i,j,k,l
@@ -632,6 +711,7 @@ contains
     !$OMP END DO
     !$OMP END PARALLEL
 !    stop
+
   end subroutine compute_T
   
   
@@ -758,26 +838,38 @@ contains
     type(t_mesh)::m
     type(t_param)::param
     double precision:: Lwidth 
-
+    m%dim=param%dim
     Lwidth=param%box_width
     m%Nx=param%Nx
-!    m%Nx=5
-    m%Ny=m%Nx
-    m%Nz=m%Nx
-    m%N=m%Nx*m%Ny*m%Nz
-
     m%dx=Lwidth/(m%Nx+1)
-    m%dy=Lwidth/(m%Ny+1)
-    m%dz=Lwidth/(m%Nz+1)
+    if(m%dim.eq.3) then
+       m%Ny=m%Nx
+       m%Nz=m%Nx
+       m%dy=Lwidth/(m%Ny+1)
+       m%dz=Lwidth/(m%Nz+1)
+    else   if(m%dim.eq.1) then
+       m%Ny=1
+       m%Nz=1
+       m%dy=1.0
+       m%dz=1.0
+    else
+       print *,' STOP in init_mesh(): dimension=',m%dim,' not yet implemented!'
+       stop
+    end if
+    m%N=m%Nx*m%Ny*m%Nz
     m%dv=m%dx*m%dy*m%dz
-    !m%dv=1.0
+
 
     m%center(1)=Lwidth/2
     m%center(2)=Lwidth/2
     m%center(3)=Lwidth/2
     
     allocate(m%n_neighbors(m%N))
-    allocate(m%list_neighbors(m%N,6)) !
+    ! max number of neighbors. It depends on m%dim:
+    ! 2*m%dim=2  @1D
+    ! 2*m%dim=4  @2D
+    ! 2*m%dim=6  @3D
+    allocate(m%list_neighbors(m%N,2*m%dim)) !
     m%list_neighbors(:,:)=0
     m%n_neighbors(:)=0
     call compute_list_neighbors(m)
@@ -795,38 +887,54 @@ contains
     type(t_mesh) :: m
     integer::i,j,k,nn
     !integer,allocatable::n_neighbors(:),list_neighbors(:,:)
-    
-    do k=1,m%Nz
-       do i=1,m%Nx
-          do j=1,m%Ny
-             nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
-             if (k>1) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Nx*m%Ny
-             end if
-             if (k<m%Nz) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Nx*m%Ny
-             end if
-             if (i>1) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Ny
-             end if
-             if (i<m%Nx) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Ny
-             end if
-             if (j>1) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn-1
-             end if
-             if (j<m%Ny) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn+1
-             end if
+
+    if(m%dim.eq.3) then
+       do k=1,m%Nz
+          do i=1,m%Nx
+             do j=1,m%Ny
+                nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
+                if (k>1) then 
+                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                   m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Nx*m%Ny
+                end if
+                if (k<m%Nz) then 
+                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                   m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Nx*m%Ny
+                end if
+                if (i>1) then 
+                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                   m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Ny
+                end if
+                if (i<m%Nx) then 
+                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                   m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Ny
+                end if
+                if (j>1) then 
+                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                   m%list_neighbors(nn,m%n_neighbors(nn))=nn-1
+                end if
+                if (j<m%Ny) then 
+                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
+                   m%list_neighbors(nn,m%n_neighbors(nn))=nn+1
+                end if
+             end do
           end do
        end do
-    end do
+    else if(m%dim.eq.1) then
+       do i=1,m%Nx
+          if (i>1) then 
+             m%n_neighbors(i)=m%n_neighbors(i)+1
+             m%list_neighbors(i,m%n_neighbors(i))=i-1
+          end if
+          if (i<m%Nx) then 
+             m%n_neighbors(i)=m%n_neighbors(i)+1
+             m%list_neighbors(i,m%n_neighbors(i))=i+1
+          end if
+       end do
+    else
+       print *,' STOP in compute_list_neighbors(): dimension=',m%dim,' not yet implemented!'
+       stop
+    end if
 
   end subroutine compute_list_neighbors
   
