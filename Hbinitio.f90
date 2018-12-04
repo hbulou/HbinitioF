@@ -74,10 +74,7 @@ program Hbinitio
   double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
   double precision,allocatable :: pot_ext(:) ! external potential
   integer :: iloop
-  character (len=1024) :: filecube
   character (len=1024)::line
-  integer :: i,j,k
-
   !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -93,14 +90,13 @@ program Hbinitio
 !  nvecini=2
   nvec=param%nvecini
   allocate(V(mesh%N,nvec))
-!  param%restart=.TRUE.
-!  param%restart=.FALSE.
+
   if (.not.(param%restart))   then
      print *,"new calculation"
      call init_basis_set(V,nvec,seed,mesh)
   else
      print *,'restart an old calculation'
-     call read_evectors(V,mesh,nvec)
+     call read_config(V,mesh,nvec)
   end if
   allocate(pot_ext(mesh%N))
   call Vext(mesh,pot_ext)
@@ -122,33 +118,8 @@ program Hbinitio
      call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot_ext,time_spent)
   end do
 
-  call save_evectors(V,mesh,param%nvecini)
-  do i=1,param%nvecini
-     call norm(mesh,V(:,i))
-     if(mesh%dim.eq.3) then
-        write(filecube,'(a,i0,a)') 'evec',i,'.cube'
-        call save_cube_3D(V(:,i),filecube,mesh)
-     else if(mesh%dim.eq.2) then
-        write(filecube,'(a,i0,a)') 'evec',i,'.dat'
-        open(unit=1,file=filecube,form='formatted',status='unknown')
-        do j=1,mesh%Nx
-           do k=1,mesh%Ny
-              write(1,*) j*mesh%dx,k*mesh%dy,V(j+(k-1)*mesh%Nx,i)
-           end do
-        end do
-        close(1)
-     else if(mesh%dim.eq.1) then
-        write(filecube,'(a,i0,a)') 'evec',i,'.dat'
-        open(unit=1,file=filecube,form='formatted',status='unknown')
-        do j=1,mesh%N
-           write(1,*) j*mesh%dx,V(j,i)
-        end do
-        close(1)
-     else
-       print *,' STOP in main(): dimension=',mesh%dim,' not yet implemented!'
-       stop
-    end if
-  end do
+  call save_config(V,mesh,param%nvecini)
+  call save_wavefunction(param,mesh,V)
 
 
   deallocate(V)
@@ -167,6 +138,47 @@ program Hbinitio
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 contains
+  ! --------------------------------------------------------------------------------------
+  !
+  !              save_wavefunction(param,mesh,V)
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine save_wavefunction(param,mesh,V)
+    implicit none
+    type(t_param)::param
+    type(t_mesh)::mesh
+    double precision::V(:,:)
+    
+    integer :: i,j,k
+    character (len=1024) :: filecube
+
+    do i=1,param%nvecini
+       call norm(mesh,V(:,i))
+       if(mesh%dim.eq.3) then    ! 3D
+          write(filecube,'(a,i0,a)') 'evec',i,'.cube'
+          call save_cube_3D(V(:,i),filecube,mesh)
+       else if(mesh%dim.eq.2) then   ! 2D
+          write(filecube,'(a,i0,a)') 'evec',i,'.dat'
+          open(unit=1,file=filecube,form='formatted',status='unknown')
+          do j=1,mesh%Nx
+             do k=1,mesh%Ny
+                write(1,*) j*mesh%dx,k*mesh%dy,V(j+(k-1)*mesh%Nx,i)
+             end do
+          end do
+          close(1)
+       else if(mesh%dim.eq.1) then  ! 1D
+          write(filecube,'(a,i0,a)') 'evec',i,'.dat'
+          open(unit=1,file=filecube,form='formatted',status='unknown')
+          do j=1,mesh%N
+             write(1,*) j*mesh%dx,V(j,i)
+          end do
+          close(1)
+       else
+          print *,' STOP in main(): dimension=',mesh%dim,' not yet implemented!'
+          stop
+       end if
+    end do
+  end subroutine save_wavefunction
   ! --------------------------------------------------------------------------------------
   !
   !              read_param()
@@ -244,10 +256,12 @@ contains
   end subroutine read_param
   ! --------------------------------------------------------------------------------------
   !
-  !              save_evectors()
+  !                             save_config()
   !
+  ! subroutine to save the configuration of the calculation in order to restart it
+  ! later if necessary
   ! --------------------------------------------------------------------------------------
-  subroutine save_evectors(V,m,nvecini)
+  subroutine save_config(V,m,nvecini)
     implicit none
     type(t_mesh)::m
     double precision :: V(:,:)
@@ -257,23 +271,30 @@ contains
        write(1,*) (V(i,j),j=1,nvecini)
     end do
     close(1)
-  end subroutine save_evectors
+  end subroutine save_config
   ! --------------------------------------------------------------------------------------
   !
-  !              read_evectors()
+  !              read_config()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine read_evectors(V,m,nvecini)
+  subroutine read_config(V,m,nvecini)
     implicit none
     type(t_mesh)::m
     double precision :: V(:,:)
     integer::nvecini,i,j
-    open(unit=1,file="evectors.dat",form='formatted',status='unknown')
-    do i=1,m%N
-       read(1,*) (V(i,j),j=1,nvecini)
-    end do
-    close(1)
-  end subroutine read_evectors
+    logical :: file_exists
+    INQUIRE(FILE="evectors.dat", EXIST=file_exists)
+    if(file_exists) then
+       open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+       do i=1,m%N
+          read(1,*) (V(i,j),j=1,nvecini)
+       end do
+       close(1)
+    else
+       print *,"### ERROR ### evectors.dat doesn't exist"
+       stop
+    end if
+  end subroutine read_config
   ! --------------------------------------------------------------------------------------
   !
   !              simpson()
