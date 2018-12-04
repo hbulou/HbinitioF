@@ -1,4 +1,4 @@
-restart=.FALSE.
+restart=.TRUE.
 loopmax=5000
 nvecini=20
 nvecmax=41
@@ -7,3 +7,5 @@ nvec_to_cvg=9
 ETA=1.0e-4
 box_width=10.0
 dimension=1
+Iperturb=1.0
+sigma=1.0

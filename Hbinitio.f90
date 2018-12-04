@@ -66,6 +66,8 @@ program Hbinitio
      double precision :: ETA
      double precision::box_width
      integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
+     double precision::Iperturb
+     double precision::sigma
   end type t_param
   type(t_param)::param
   type t_potential
@@ -74,12 +76,17 @@ program Hbinitio
      double precision,allocatable :: tot(:) ! perturbation potential
   end type t_potential
   type (t_potential)::pot
+  type t_wavefunction
+     double precision,allocatable::S(:)
+  end type t_wavefunction
+  type(t_wavefunction):: wf
   integer :: nvec
   integer,parameter :: seed = 86456
   double precision,allocatable :: V(:,:) ! wavefunctions
   double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
   integer :: iloop
   character (len=1024)::line
+
   !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -107,8 +114,8 @@ program Hbinitio
   allocate(pot%perturb(mesh%N))
   allocate(pot%tot(mesh%N))
   call Vext(mesh,pot%ext)
-  call Vperturb(mesh,pot%perturb)
-  pot%tot=pot%ext+pot%perturb
+  call Vperturb(mesh,pot,param)
+  pot%tot=pot%ext !+pot%perturb
   open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
   
   iloop=1
@@ -123,15 +130,18 @@ program Hbinitio
      write(*,'(A)') 'Main > #######################################'     
      write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
      write(*,'(A)') 'Main > #######################################'     
-     call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot,time_spent)
+     call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot,time_spent,wf)
   end do
 
   call save_config(V,mesh,param%nvecini)
   call save_wavefunction(param,mesh,V)
 
+  call calc_coeff(param,V,pot,mesh,wf)
+
+
 
   
-
+  
   deallocate(V)
   deallocate(Sprev)
   deallocate(dS)
@@ -150,6 +160,26 @@ program Hbinitio
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 contains
+  ! --------------------------------------------------------------------------------------
+  !
+  !              calc_coeff()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine calc_coeff(param,V,pot,mesh,wf)
+    implicit none
+    type(t_wavefunction)::wf
+    type(t_mesh)::mesh
+    type(t_potential)::pot
+    double precision::V(:,:)
+    type(t_param)::param
+    integer::i,j
+    do i=1,param%nvec_to_cvg
+       print *,mesh%dv*sum(V(:,i)*pot%perturb*V(:,i)),mesh%dv*sum(V(:,i)*pot%perturb*V(:,i))+wf%S(i)
+!       do j=1,param%nvec_to_cvg
+!          print *,i,j
+!       end do
+    end do
+  end subroutine calc_coeff
   ! --------------------------------------------------------------------------------------
   !
   !              save_wavefunction(param,mesh,V)
@@ -212,6 +242,8 @@ contains
     param%ETA=1.0e-3
     param%dim=1
     param%box_width=pi/sqrt(2.0)
+    param%Iperturb=1.0
+    param%sigma=1.0
     open(unit=1,file='inp',form='formatted')
     do while(.not.(is_iostat_end(param%ieof)))
        read(1,*,iostat=param%ieof) line
@@ -249,6 +281,12 @@ contains
        if(line(1:eqidx-1).eq."dimension") then
           read(line(eqidx+1:lline),*) param%dim
        end if
+       if(line(1:eqidx-1).eq."sigma") then
+          read(line(eqidx+1:lline),*) param%sigma
+       end if
+       if(line(1:eqidx-1).eq."Iperturb") then
+          read(line(eqidx+1:lline),*) param%Iperturb
+       end if
        line=''
     end do
     close(1)
@@ -264,6 +302,8 @@ contains
     print *,'#Nx=',param%nx
     print *,'#dh=',param%box_width/(param%Nx+1)
     print *,'#Dimension of the mesh=',param%dim
+    print *,'#Magnitude of the perturbation=',param%Iperturb
+    print *,'#Spread of the perturbation=',param%sigma
 
   end subroutine read_param
   ! --------------------------------------------------------------------------------------
@@ -370,21 +410,20 @@ contains
   !              Vperturb()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine Vperturb(m,pot_perturb)
+  subroutine Vperturb(m,pot,param)
     implicit none
     type(t_mesh) :: m
-    double precision :: pot_perturb(:)
+    type(t_param)::param
+    type(t_potential)::pot
     double precision :: pts(3),rsqr
 
     double precision, parameter :: pi=3.1415927
-    double precision, parameter :: sigma=1.0
     double precision :: invsig
-    double precision, parameter :: Iperturb=5.0
     double precision :: facperturb
     integer :: i,j,nn
 
-    facperturb=Iperturb/sqrt(2*pi*sigma**2)
-    invsig=0.5/sigma**2
+    facperturb=param%Iperturb/sqrt(2*pi*param%sigma**2)
+    invsig=0.5/param%sigma**2
     if(m%dim.eq.2) then
        open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
        do i=1,m%Nx
@@ -393,8 +432,8 @@ contains
              pts(2)=j*m%dy
              rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2
              nn=j+(i-1)*m%Ny
-             pot_perturb(nn)=facperturb*exp(-invsig*rsqr)
-             write(1,*) pts(1),pts(2),pot_perturb(nn)
+             pot%perturb(nn)=facperturb*exp(-invsig*rsqr)
+             write(1,*) pts(1),pts(2),pot%perturb(nn)
           end do
        end do
        close(1)
@@ -403,8 +442,8 @@ contains
        do i=1,m%Nx
           pts(1)=i*m%dx
           rsqr=(pts(1)-m%center(1))**2
-          pot_perturb(i)=facperturb*exp(-invsig*rsqr)
-          write(1,*) pts(1),pot_perturb(i)
+          pot%perturb(i)=facperturb*exp(-invsig*rsqr)
+          write(1,*) pts(1),pot%perturb(i)
        end do
        close(1)
     else
@@ -473,8 +512,9 @@ contains
   !              DAVIDSON()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot,time_spent)
+  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot,time_spent,wf)
     implicit none
+    type(t_wavefunction)::wf
     integer :: nvec,nvecini,iloop
     double precision,allocatable :: V(:,:)   !,pot_ext(:)
     type(t_mesh) :: m
@@ -482,7 +522,7 @@ contains
     type(t_time)::time_spent
     type(t_potential)::pot
     
-    double precision,allocatable :: S(:)          ! eigenvalues
+!    double precision,allocatable :: S(:)          ! eigenvalues
     double precision,allocatable :: T(:,:)        ! reduced matrix T
     double precision,allocatable :: VRitz(:,:)    ! Ritz's vectors
     double precision,allocatable :: residual(:,:) ! residual
@@ -500,22 +540,22 @@ contains
     call time_tracking_write(iloop,time_spent,'Davidson -> compute_T')
     
     ! Diagonatilzation of T
-    allocate(S(nvec))
+    allocate(wf%S(nvec))
 
     call cpu_time(time_spent%start_loc)
-    call diagonalization(S,T,nvec)
+    call diagonalization(wf%S,T,nvec)
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> Diagonalization')
 
     
-    dS(:)=S(1:nvecini)-Sprev(:)
-    Sprev(:)=S(1:nvecini)
+    dS(:)=wf%S(1:nvecini)-Sprev(:)
+    Sprev(:)=wf%S(1:nvecini)
     do i=1,nvecini
-       write(*,'(A,I6,A,F12.6,A,E12.2,A)') 'Main > Eigenvalue(',i,'): ',S(i),'(',dS(i),')'
+       write(*,'(A,I6,A,F12.6,A,E12.2,A)') 'Main > Eigenvalue(',i,'): ',wf%S(i),'(',dS(i),')'
     end do
     !call cpu_time(inter)
     open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
-    write(1,*) iloop,S(1:nvecini)
+    write(1,*) iloop,wf%S(1:nvecini)
     close(1)
     ! computation of the Ritz's vectors
     allocate(VRitz(m%N,nvec))
@@ -534,7 +574,7 @@ contains
     
 
     call cpu_time(time_spent%start_loc)
-    call compute_residual(residual,VRitz,S,nvec,cvg,m,pot%tot)
+    call compute_residual(residual,VRitz,wf%S,nvec,cvg,m,pot%tot)
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> Residual')
 
@@ -544,7 +584,7 @@ contains
     !call cpu_time(inter)
 
     call cpu_time(time_spent%start_loc)
-    call compute_delta(delta,residual,S,nvec,cvg,m,ndelta,pot%tot)
+    call compute_delta(delta,residual,wf%S,nvec,cvg,m,ndelta,pot%tot)
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> Delta')
 
@@ -577,7 +617,7 @@ contains
     !call check_ortho(V,nvec,m)
     print *,'Main > New size of the basis ',nvec
     iloop=iloop+1
-    deallocate(S)
+!    deallocate(S)
     deallocate(T)
     deallocate(VRitz)
     deallocate(residual)
