@@ -35,10 +35,12 @@ program Hbinitio
   use time_tracking
   implicit none
 !  include 'mpif.h'
+  !------------------------------------------
   type t_GramSchmidt
      integer :: nindep
      integer :: ndep ! number of linear dependencies discovered
   end type t_GramSchmidt
+  !------------------------------------------
   type t_mesh
      integer :: Nx,Ny,Nz,N
      integer,allocatable :: list_neighbors(:,:),n_neighbors(:)
@@ -47,6 +49,7 @@ program Hbinitio
      integer :: dim
   end type t_mesh
   type(t_mesh) :: mesh
+  !------------------------------------------
   type t_cvg
      integer,allocatable:: list_cvg(:)
      integer :: ncvg
@@ -55,6 +58,7 @@ program Hbinitio
   end type t_cvg
   type(t_cvg) :: cvg
   type(t_time) :: time_spent
+  !------------------------------------------
   type t_param
      logical::restart
      integer::ieof
@@ -70,23 +74,31 @@ program Hbinitio
      double precision::sigma
   end type t_param
   type(t_param)::param
+  !------------------------------------------
+  type t_perturb
+     double precision,allocatable::coeff(:,:)
+  end type t_perturb
+  type(t_perturb)::perturb
+  !------------------------------------------
   type t_potential
      double precision,allocatable :: ext(:) ! external potential
      double precision,allocatable :: perturb(:) ! perturbation potential
      double precision,allocatable :: tot(:) ! perturbation potential
   end type t_potential
   type (t_potential)::pot
+  !------------------------------------------
   type t_wavefunction
      double precision,allocatable::S(:)
+     double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
   end type t_wavefunction
   type(t_wavefunction):: wf
+  !------------------------------------------
   integer :: nvec
   integer,parameter :: seed = 86456
   double precision,allocatable :: V(:,:) ! wavefunctions
-  double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
   integer :: iloop
   character (len=1024)::line
-
+  integer :: i,j
   !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -121,11 +133,13 @@ program Hbinitio
   iloop=1
   cvg%ncvg=0
   cvg%nvec_to_cvg=param%nvec_to_cvg
+  allocate(perturb%coeff(cvg%nvec_to_cvg,cvg%nvec_to_cvg))
   cvg%ETA=param%ETA
-  allocate(Sprev(param%nvecini))
-  allocate(dS(param%nvecini))
-  Sprev(:)=0.0
-  dS(:)=0.0
+  allocate(wf%S(param%nvecini))
+  allocate(wf%Sprev(param%nvecini))
+  allocate(wf%dS(param%nvecini))
+  wf%Sprev(:)=0.0
+  wf%dS(:)=0.0
   do while((iloop.le.param%loopmax).and.(cvg%ncvg.lt.cvg%nvec_to_cvg))
      write(*,'(A)') 'Main > #######################################'     
      write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
@@ -136,18 +150,25 @@ program Hbinitio
   call save_config(V,mesh,param%nvecini)
   call save_wavefunction(param,mesh,V)
 
-  call calc_coeff(param,V,pot,mesh,wf)
+  call calc_coeff(param,V,pot,mesh,wf,perturb)
+  do i=1,cvg%nvec_to_cvg
+     print *,perturb%coeff(i,i),perturb%coeff(i,i)+wf%S(i)
+  end do
 
-
+  do i=1,cvg%nvec_to_cvg
+     print *,(perturb%coeff(i,j),j=1,cvg%nvec_to_cvg)
+  end do
 
   
   
   deallocate(V)
-  deallocate(Sprev)
-  deallocate(dS)
+  deallocate(wf%Sprev)
+  deallocate(wf%dS)
+  deallocate(wf%S)
   deallocate(pot%ext)
   deallocate(pot%perturb)
   deallocate(pot%tot)
+  deallocate(perturb%coeff)
   call free_mesh(mesh)
   call cpu_time(time_spent%end)
   if (cvg%ncvg.ge.cvg%nvec_to_cvg) print *,'Main > Job DONE !'
@@ -165,8 +186,9 @@ contains
   !              calc_coeff()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine calc_coeff(param,V,pot,mesh,wf)
+  subroutine calc_coeff(param,V,pot,mesh,wf,perturb)
     implicit none
+    type(t_perturb)::perturb
     type(t_wavefunction)::wf
     type(t_mesh)::mesh
     type(t_potential)::pot
@@ -174,10 +196,9 @@ contains
     type(t_param)::param
     integer::i,j
     do i=1,param%nvec_to_cvg
-       print *,mesh%dv*sum(V(:,i)*pot%perturb*V(:,i)),mesh%dv*sum(V(:,i)*pot%perturb*V(:,i))+wf%S(i)
-!       do j=1,param%nvec_to_cvg
-!          print *,i,j
-!       end do
+       do j=1,param%nvec_to_cvg
+          perturb%coeff(i,j)=mesh%dv*sum(V(:,i)*pot%perturb*V(:,j))
+       end do
     end do
   end subroutine calc_coeff
   ! --------------------------------------------------------------------------------------
@@ -522,7 +543,7 @@ contains
     type(t_time)::time_spent
     type(t_potential)::pot
     
-!    double precision,allocatable :: S(:)          ! eigenvalues
+    double precision,allocatable :: S(:)          ! eigenvalues
     double precision,allocatable :: T(:,:)        ! reduced matrix T
     double precision,allocatable :: VRitz(:,:)    ! Ritz's vectors
     double precision,allocatable :: residual(:,:) ! residual
@@ -540,18 +561,18 @@ contains
     call time_tracking_write(iloop,time_spent,'Davidson -> compute_T')
     
     ! Diagonatilzation of T
-    allocate(wf%S(nvec))
+    allocate(S(nvec))
 
     call cpu_time(time_spent%start_loc)
-    call diagonalization(wf%S,T,nvec)
+    call diagonalization(S,T,nvec)
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> Diagonalization')
 
-    
-    dS(:)=wf%S(1:nvecini)-Sprev(:)
-    Sprev(:)=wf%S(1:nvecini)
+    wf%S(1:nvecini)=S(1:nvecini)
+    wf%dS(:)=wf%S(1:nvecini)-wf%Sprev(:)
+    wf%Sprev(:)=wf%S(1:nvecini)
     do i=1,nvecini
-       write(*,'(A,I6,A,F12.6,A,E12.2,A)') 'Main > Eigenvalue(',i,'): ',wf%S(i),'(',dS(i),')'
+       write(*,'(A,I6,A,F12.6,A,E12.2,A)') 'Main > Eigenvalue(',i,'): ',wf%S(i),'(',wf%dS(i),')'
     end do
     !call cpu_time(inter)
     open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
@@ -617,7 +638,7 @@ contains
     !call check_ortho(V,nvec,m)
     print *,'Main > New size of the basis ',nvec
     iloop=iloop+1
-!    deallocate(S)
+    deallocate(S)
     deallocate(T)
     deallocate(VRitz)
     deallocate(residual)
