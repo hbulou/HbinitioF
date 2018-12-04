@@ -68,11 +68,16 @@ program Hbinitio
      integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
   end type t_param
   type(t_param)::param
+  type t_potential
+     double precision,allocatable :: ext(:) ! external potential
+     double precision,allocatable :: perturb(:) ! perturbation potential
+     double precision,allocatable :: tot(:) ! perturbation potential
+  end type t_potential
+  type (t_potential)::pot
   integer :: nvec
   integer,parameter :: seed = 86456
   double precision,allocatable :: V(:,:) ! wavefunctions
   double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
-  double precision,allocatable :: pot_ext(:) ! external potential
   integer :: iloop
   character (len=1024)::line
   !  integer::ierr,my_id,num_procs
@@ -98,9 +103,12 @@ program Hbinitio
      print *,'restart an old calculation'
      call read_config(V,mesh,nvec)
   end if
-  allocate(pot_ext(mesh%N))
-  call Vext(mesh,pot_ext)
-
+  allocate(pot%ext(mesh%N))
+  allocate(pot%perturb(mesh%N))
+  allocate(pot%tot(mesh%N))
+  call Vext(mesh,pot%ext)
+  call Vperturb(mesh,pot%perturb)
+  pot%tot=pot%ext+pot%perturb
   open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
   
   iloop=1
@@ -115,17 +123,21 @@ program Hbinitio
      write(*,'(A)') 'Main > #######################################'     
      write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
      write(*,'(A)') 'Main > #######################################'     
-     call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot_ext,time_spent)
+     call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot,time_spent)
   end do
 
   call save_config(V,mesh,param%nvecini)
   call save_wavefunction(param,mesh,V)
 
 
+  
+
   deallocate(V)
   deallocate(Sprev)
   deallocate(dS)
-  deallocate(pot_ext)
+  deallocate(pot%ext)
+  deallocate(pot%perturb)
+  deallocate(pot%tot)
   call free_mesh(mesh)
   call cpu_time(time_spent%end)
   if (cvg%ncvg.ge.cvg%nvec_to_cvg) print *,'Main > Job DONE !'
@@ -344,8 +356,8 @@ contains
     else if(m%dim.eq.2) then
        normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
     else    if(m%dim.eq.1) then
-!       normloc=1.0/sqrt(trapz(m,evec))
-!       print *,normloc,sqrt(trapz(m,evec))
+       !       normloc=1.0/sqrt(trapz(m,evec))
+       !       print *,normloc,sqrt(trapz(m,evec))
        normloc=1.0/sqrt(simpson(m,evec))
     else
        print *,' STOP in norm(): dimension=',m%dim,' not yet implemented!'
@@ -353,6 +365,53 @@ contains
     end if
     call dscal(m%N,normloc,evec(:),1)
   end subroutine norm
+  ! --------------------------------------------------------------------------------------
+  !
+  !              Vperturb()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine Vperturb(m,pot_perturb)
+    implicit none
+    type(t_mesh) :: m
+    double precision :: pot_perturb(:)
+    double precision :: pts(3),rsqr
+
+    double precision, parameter :: pi=3.1415927
+    double precision, parameter :: sigma=1.0
+    double precision :: invsig
+    double precision, parameter :: Iperturb=5.0
+    double precision :: facperturb
+    integer :: i,j,nn
+
+    facperturb=Iperturb/sqrt(2*pi*sigma**2)
+    invsig=0.5/sigma**2
+    if(m%dim.eq.2) then
+       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
+       do i=1,m%Nx
+          pts(1)=i*m%dx
+          do j=1,m%Ny
+             pts(2)=j*m%dy
+             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2
+             nn=j+(i-1)*m%Ny
+             pot_perturb(nn)=facperturb*exp(-invsig*rsqr)
+             write(1,*) pts(1),pts(2),pot_perturb(nn)
+          end do
+       end do
+       close(1)
+    else        if(m%dim.eq.1) then
+       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
+       do i=1,m%Nx
+          pts(1)=i*m%dx
+          rsqr=(pts(1)-m%center(1))**2
+          pot_perturb(i)=facperturb*exp(-invsig*rsqr)
+          write(1,*) pts(1),pot_perturb(i)
+       end do
+       close(1)
+    else
+       print *,' STOP in Vperturb(): dimension=',m%dim,' not yet implemented!'
+       stop
+    end if
+  end subroutine Vperturb
   ! --------------------------------------------------------------------------------------
   !
   !              Vext()
@@ -414,20 +473,21 @@ contains
   !              DAVIDSON()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot_ext,time_spent)
+  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot,time_spent)
     implicit none
     integer :: nvec,nvecini,iloop
-    double precision,allocatable :: V(:,:),pot_ext(:)
+    double precision,allocatable :: V(:,:)   !,pot_ext(:)
     type(t_mesh) :: m
     type(t_cvg)::cvg
     type(t_time)::time_spent
+    type(t_potential)::pot
     
-    double precision,allocatable :: S(:) ! eigenvalues
-    double precision,allocatable :: T(:,:) ! reduced matrix T
-    double precision,allocatable :: VRitz(:,:) ! Ritz's vectors
+    double precision,allocatable :: S(:)          ! eigenvalues
+    double precision,allocatable :: T(:,:)        ! reduced matrix T
+    double precision,allocatable :: VRitz(:,:)    ! Ritz's vectors
     double precision,allocatable :: residual(:,:) ! residual
-    double precision,allocatable :: delta(:,:) ! delta vectors
-    double precision,allocatable :: Vnew(:,:) ! Vnew
+    double precision,allocatable :: delta(:,:)    ! delta vectors
+    double precision,allocatable :: Vnew(:,:)     ! Vnew
     integer :: i
     integer :: ndelta
     integer :: newnvec
@@ -435,7 +495,7 @@ contains
     ! T (reduced matrix) computing
     allocate(T(nvec,nvec))
     call cpu_time(time_spent%start_loc)
-    call compute_T(T,V,nvec,m,pot_ext)
+    call compute_T(T,V,nvec,m,pot%tot)
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> compute_T')
     
@@ -474,7 +534,7 @@ contains
     
 
     call cpu_time(time_spent%start_loc)
-    call compute_residual(residual,VRitz,S,nvec,cvg,m,pot_ext)
+    call compute_residual(residual,VRitz,S,nvec,cvg,m,pot%tot)
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> Residual')
 
@@ -484,7 +544,7 @@ contains
     !call cpu_time(inter)
 
     call cpu_time(time_spent%start_loc)
-    call compute_delta(delta,residual,S,nvec,cvg,m,ndelta,pot_ext)
+    call compute_delta(delta,residual,S,nvec,cvg,m,ndelta,pot%tot)
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> Delta')
 
@@ -571,13 +631,13 @@ contains
   !              COMPUTE_DELTA()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine compute_delta(delta,r,lambda,nvec,cvg,m,ndelta,pot_ext)
+  subroutine compute_delta(delta,r,lambda,nvec,cvg,m,ndelta,pot_tot)
     ! INPUT: the residual |r>, the Ritz's vectors |VRitz>, the eigenvalues lambda
     ! OUTPUT : the correction |delta> to improve the  Ritz's vectors so that to
     !          minimize the residual
     implicit none
     type(t_mesh)::m
-    double precision :: lambda(:),r(:,:),delta(:,:),pot_ext(:)
+    double precision :: lambda(:),r(:,:),delta(:,:),pot_tot(:)
     integer :: nvec,ndelta
     type(t_cvg)::cvg
     
@@ -600,8 +660,8 @@ contains
        if(cvg%list_cvg(i).eq.0) then
           ndelta=ndelta+1
           do j=1,m%N
-             delta(j,ndelta)=r(j,ndelta)/((m%dim/deltasqr+pot_ext(j))-lambda(i))
-!             Dinv(j,j)=1.0/((3.0/deltasqr+pot_ext(j))-lambda(i))
+             delta(j,ndelta)=r(j,ndelta)/((m%dim/deltasqr+pot_tot(j))-lambda(i))
+!             Dinv(j,j)=1.0/((3.0/deltasqr+pot_tot(j))-lambda(i))
           end do
           ! see Victor Eijkhout in "Introduction to scientific and technical computing" edited by Willmore et al
           ! Chap 15 Libraries for Linear Algebra
@@ -624,11 +684,11 @@ contains
   !              COMPUTE_RESIDUAL()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine compute_residual(r,VRitz,S,nvec,cvg,m,pot_ext)
+  subroutine compute_residual(r,VRitz,S,nvec,cvg,m,pot_tot)
     implicit none
     type(t_mesh)::m
     integer :: nvec
-    double precision :: r(:,:),VRitz(:,:),S(:),pot_ext(:)
+    double precision :: r(:,:),VRitz(:,:),S(:),pot_tot(:)
     type(t_cvg) :: cvg
 
     integer :: i,j,k
@@ -644,7 +704,7 @@ contains
     cvg%ncvg=0
     do j=1,nvec
        do i=1,m%N
-          r(i,j)=(m%dim/deltasqr+pot_ext(i))*VRitz(i,j)
+          r(i,j)=(m%dim/deltasqr+pot_tot(i))*VRitz(i,j)
           do k=1,m%n_neighbors(i)
              r(i,j)=r(i,j)-0.5*VRitz(m%list_neighbors(i,k),j)/deltasqr
           end do
@@ -724,9 +784,9 @@ contains
   !              COMPUTE_T()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine compute_T(T,V,nvec,m,pot_ext)
+  subroutine compute_T(T,V,nvec,m,pot_tot)
     implicit none
-    double precision,allocatable :: V(:,:),T(:,:),pot_ext(:)
+    double precision,allocatable :: V(:,:),T(:,:),pot_tot(:)
     integer :: nvec
     type(t_mesh)::m
     
@@ -741,7 +801,7 @@ contains
        do i=1,nvec ! Tij
           T(i,j)=0.0
           do k=1,m%N
-             acc=(m%dim/deltasqr+pot_ext(k))*V(k,j) ! the potential will be added here
+             acc=(m%dim/deltasqr+pot_tot(k))*V(k,j) ! the potential will be added here
              do l=1,m%n_neighbors(k)
                 acc=acc-0.5*V(m%list_neighbors(k,l),j)/deltasqr
 !                print *, omp_get_thread_num(),i,j,k,l
