@@ -27,6 +27,10 @@
 }
 \begin{document}
 
+\section{Structure of the code}
+
+
+
 \begin{tikzpicture}[node distance=.8cm,start chain=going below,]
   \node[boite,join](read_param) {read\_param()};
   \node[boite,join](init_mesh) {init\_mesh()};
@@ -43,6 +47,17 @@
   \draw[line] (init_evec3) edge (Vext);
  \end{tikzpicture}
 
+
+
+\section{Dealing with the perturbation}
+
+
+ 
+\section{Sources}
+\label{Sources}
+
+
+ 
 \begin{verbatim}
 #! /bin/bash
 ####SBATCH -p public
