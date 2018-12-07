@@ -3,7 +3,11 @@ loopmax=5000
 nvecini=20
 nvecmax=41
 Nx=400
+<<<<<<< HEAD
 nvec_to_cvg=5
+=======
+nvec_to_cvg=5
+>>>>>>> ffc7ced1a9644d0418e456eb4b4fb475d4392feb
 ETA=1.0e-4
 box_width=10.0
 dimension=1
