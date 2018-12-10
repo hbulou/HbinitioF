@@ -63,7 +63,7 @@ program Hbinitio
      logical::restart
      integer::ieof
      integer::loopmax
-     integer::nvecini
+     integer::nvecmin
      integer::nvecmax
      integer::Nx
      integer::nvec_to_cvg
@@ -90,38 +90,24 @@ program Hbinitio
   type t_wavefunction
      double precision,allocatable::S(:)
      double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
+     integer :: nwfc,N
+     double precision,allocatable::wfc(:,:)
   end type t_wavefunction
   type(t_wavefunction):: wf
   !------------------------------------------
-  integer :: nvec
-  integer,parameter :: seed = 86456
-  double precision,allocatable :: V(:,:) ! wavefunctions
-  integer :: iloop
   character (len=1024)::line
   integer :: i,j
   !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   call time_tracking_init(time_spent)
-
 !  call mpi_init(ierr )
 !  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
 !  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
-
   call read_param(param)
+
+
   call init_mesh(mesh,param)  
-
-!  nvecini=2
-  nvec=param%nvecini
-  allocate(V(mesh%N,nvec))
-
-  if (.not.(param%restart))   then
-     print *,"new calculation"
-     call init_basis_set(V,nvec,seed,mesh)
-  else
-     print *,'restart an old calculation'
-     call read_config(V,mesh,nvec)
-  end if
   allocate(pot%ext(mesh%N))
   allocate(pot%perturb(mesh%N))
   allocate(pot%tot(mesh%N))
@@ -129,28 +115,27 @@ program Hbinitio
   call Vperturb(mesh,pot,param)
   pot%tot=pot%ext !+pot%perturb
   open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
-  
-  iloop=1
-  cvg%ncvg=0
   cvg%nvec_to_cvg=param%nvec_to_cvg
   allocate(perturb%coeff(cvg%nvec_to_cvg,cvg%nvec_to_cvg))
   cvg%ETA=param%ETA
-  allocate(wf%S(param%nvecini))
-  allocate(wf%Sprev(param%nvecini))
-  allocate(wf%dS(param%nvecini))
-  wf%Sprev(:)=0.0
-  wf%dS(:)=0.0
-  do while((iloop.le.param%loopmax).and.(cvg%ncvg.lt.cvg%nvec_to_cvg))
-     write(*,'(A)') 'Main > #######################################'     
-     write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
-     write(*,'(A)') 'Main > #######################################'     
-     call davidson(nvec,V,mesh,param%nvecini,iloop,cvg,pot,time_spent,wf)
-  end do
+  wf%nwfc=param%nvecmin
+  wf%N=mesh%N
+  allocate(wf%S(wf%nwfc))
+  allocate(wf%Sprev(wf%nwfc))
+  allocate(wf%dS(wf%nwfc))
+  allocate(wf%wfc(wf%N,wf%nwfc))
 
-  call save_config(V,mesh,param%nvecini)
-  call save_wavefunction(param,mesh,V)
+  call numerov(wf,pot,mesh)
+  
+  call davidson(param,mesh,cvg,wf,pot,time_spent)
 
-  call calc_coeff(param,V,pot,mesh,wf,perturb)
+
+  !--------------------------------------------------------------------------
+  !
+  ! perturbation theory
+  !
+  !--------------------------------------------------------------------------
+  call calc_coeff(param,pot,mesh,wf,perturb)
   do i=1,cvg%nvec_to_cvg
      print *,perturb%coeff(i,i),perturb%coeff(i,i)+wf%S(i)
   end do
@@ -161,7 +146,11 @@ program Hbinitio
 
   
   
-  deallocate(V)
+  !--------------------------------------------------------------------------
+  !
+  ! end of Hbinitio
+  !
+  !--------------------------------------------------------------------------
   deallocate(wf%Sprev)
   deallocate(wf%dS)
   deallocate(wf%S)
@@ -183,40 +172,490 @@ program Hbinitio
 contains
   ! --------------------------------------------------------------------------------------
   !
+  !             Numerov()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine numerov(wf,pot,mesh)
+    type(t_wavefunction)::wf
+    type(t_potential)::pot
+    type(t_mesh)::mesh
+
+    integer :: i,j,n_nodes_wanted,idxwfc,nwfc,l
+    double precision,allocatable::r(:),rho(:)
+
+    allocate(r(wf%N))
+    r(1)=1.0e-12
+    do i=2,wf%N
+       r(i)=(i-1)*mesh%dx
+    end do
+
+
+    ! V=rR=r^(l+1)*summation
+    
+    l=0
+    do i=1,wf%N
+       pot%tot(i)=-1.0/r(i)+0.5*l*(l+1)/r(i)**2
+    end do
+    print *,minval(pot%tot),maxval(pot%tot)
+    
+    nwfc=cvg%nvec_to_cvg
+    do i=1,nwfc
+       n_nodes_wanted=i       
+       idxwfc=i
+       call numerov_step(n_nodes_wanted,wf,r,cvg,param,idxwfc,pot,l)
+    end do
+
+    open(unit=1,file='numerov.dat',form='formatted',status='unknown')
+    do i=1,mesh%N
+       write(1,*) r(i),(wf%wfc(i,j),j=1,nwfc)
+    end do
+    close(1)
+
+    do i=1,nwfc
+       print *,wf%S(i),' Ha=',27.211*wf%S(i),' eV'
+    end do
+
+    call serie(wf,mesh,r)
+
+stop
+    
+    allocate(rho(wf%N))
+    rho(1)=0
+    do i=2,mesh%N
+       rho(i)=-(wf%wfc(i,1)/r(i))**2
+    end do
+
+    open(unit=1,file='rho.dat',form='formatted',status='unknown')
+    do i=1,mesh%N
+       write(1,*) r(i),wf%wfc(i,1),rho(i)
+    end do
+    close(1)
+
+    
+    stop
+
+    
+
+  end subroutine numerov
+  ! --------------------------------------------------------------------------------------
+  !
+  !             serie()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine serie(wf,mesh,r)
+    implicit none
+    type(t_mesh)::mesh
+    type(t_wavefunction)::wf
+    integer, parameter :: nmax=3
+    double precision, dimension(nmax) :: a
+    double precision:: r(:)
+    double precision, dimension(nmax,nmax) :: b
+    double precision :: som
+    integer :: i, j,info, lda, ldb, nrhs, n
+    integer, dimension(nmax) :: ipiv
+      
+      
+
+    do i=1,nmax
+       do j=1,nmax
+          b(j,i)=r(1+i)**j  
+       end do
+       a(i)=wf%wfc(1+i,1)
+      end do
+      nrhs = 1 ! number of right hand sides in b
+      lda = nmax  ! leading dimension of a
+      ldb = nmax  ! leading dimension of b
+
+      call dgesv(n, nrhs, b, lda, ipiv, a, ldb, info)
+      print *,'a=',a
+
+      som=0
+      do i=1,nmax
+         som=som+a(i)*(r(2)**i)
+      end do
+      print *,r(2),wf%wfc(2,1),som
+      print *,r(:10)
+
+      ! Note: the solution is returned in b
+      ! and a has been changed.
+
+    end subroutine serie
+  ! --------------------------------------------------------------------------------------
+  !
+  !             numerov_step()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine numerov_step(n_nodes_wanted,wf,r,cvg,param,idxwfc,pot,l)
+    integer :: n_nodes_wanted
+    type(t_potential)::pot
+    type(t_param)::param
+    type(t_cvg)::cvg
+    double precision::r(:)
+    type(t_wavefunction)::wf
+    integer :: iloop
+    integer::n_nodes,idxwfc
+    double precision::eps
+    double precision,allocatable::Q(:),Vin(:),Vout(:),sqrd
+    integer :: impt,l
+    double precision::emin,emax,dVin,dVout,Iout,Iin,deps,epsold,facsign,eta
+    logical,parameter :: outward=.TRUE.,inward=.FALSE.
+    ! first we search an eigenenergy close to the soution
+    ! by considering the number of nodes of the wavefunction
+    allocate(Q(wf%N))
+    allocate(Vin(wf%N))
+    allocate(Vout(wf%N))
+    facsign=(0.5*mod(n_nodes_wanted,2)-1)
+    sqrd=mesh%dx**2
+    
+    emax=min(0.0,maxval(pot%tot))
+    emin=1e10
+    print *,'------------------------------------------------------------------------------------------'
+    print *,"Searching a wfc with ",n_nodes_wanted," nodes" 
+
+    eps=pot%tot(wf%N/2)
+    n_nodes=-1
+    
+    do while(.not.(n_nodes.eq.n_nodes_wanted))
+       call compute_Q(Q,wf%N,eps,r,pot)
+       Vout(1)=0.0; Vout(2)=0.001
+       call numerov_integrate(outward,Q,Vout,wf%N,sqrd)
+       n_nodes=count_nodes(Vout,wf%N)
+       write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(0) eps(',iloop,')=',eps,&
+            ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+       if(n_nodes.gt.n_nodes_wanted) then
+          emax=eps
+          facsign=eps-1.0
+       else if(n_nodes.le.n_nodes_wanted) then
+          emin=eps
+          facsign=eps+1.0
+       end if
+       if(emin.lt.emax) then
+          eps=0.5*(emin+emax)
+       else
+          eps=facsign
+       end if
+    end do
+    write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(1) eps(',iloop,')=',eps,&
+         ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+    do while(.not.(n_nodes.eq.(n_nodes_wanted+1)))
+       eps=0.5*(emin+emax)
+       call compute_Q(Q,wf%N,eps,r,pot)
+       Vout(1)=0.0; Vout(2)=0.001
+       call numerov_integrate(outward,Q,Vout,wf%N,sqrd)
+       n_nodes=count_nodes(Vout,wf%N)
+       write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(2) eps(',iloop,')=',eps,&
+            ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+       if(n_nodes.gt.(n_nodes_wanted+1)) then
+          emax=eps
+          facsign=eps-1.0
+       else if(n_nodes.lt.(n_nodes_wanted+1)) then
+          emin=eps
+          facsign=eps+1.0
+       end if
+       if(emin.lt.emax) then
+          eps=0.5*(emin+emax)
+       else
+          eps=facsign
+       end if
+    end do
+    write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(3) eps(',iloop,')=',eps,&
+         ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+!    stop
+
+    ! Energy levels of Hydrogen atom
+    ! n=1 -13.59
+    ! n=2   -3.40
+    ! n=3  -1.51
+    ! n=4  -0.85
+    ! n=5  -0.54
+
+    eta=2*cvg%ETA
+    iloop=1
+
+    do while((iloop.le.param%loopmax).and.(abs(eta).gt.cvg%ETA))
+       eps=0.5*(emin+emax)
+       call compute_Q(Q,wf%N,eps,r,pot)
+       impt=matching_point(Q,wf%N)
+       Vout(1)=0.0; Vout(2)=0.001
+       call numerov_integrate(outward,Q,Vout,wf%N,sqrd)
+       Vin(wf%N)=0.0; Vin(wf%N-1)=0.001
+       call numerov_integrate(inward,Q,Vin,wf%N,sqrd)
+       n_nodes=count_nodes(Vout,wf%N)
+
+        Iout=0.0
+        do i=1,impt-1
+           Iout=Iout+0.5*mesh%dx*(Vout(i)**2+Vout(i+1)**2)
+        end do
+        Iin=0.0
+        do i=impt,wf%N-1
+           Iin=Iin+0.5*mesh%dx*(Vin(i)**2+Vin(i+1)**2)
+        end do
+        dVin=0.5*(Vin(impt+1)-Vin(impt-1))/mesh%dx
+        dVout=0.5*(Vout(impt+1)-Vout(impt-1))/mesh%dx
+        deps=dVin/Vin(impt)-dVout/Vout(impt)
+        deps=deps/(Iout/Vout(impt)**2+Iin/Vin(impt)**2)
+
+
+       if(iloop.gt.1) eta=eps-epsold
+       epsold=eps
+       !write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(2) eps(',iloop,')=',eps,&
+       !     ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+
+       write(*,'(A,I4,A,F8.4,A,F8.4,A,F8.4,A,E12.6,A,E12.6,A,I4,A,E12.6,A,E12.6)') 'epsmax(',iloop,')=',eps,&
+            ' [emin,emax]=[',emin,',',emax,'] eta=',eta,' deps=',deps,' impt=',impt,&
+            ' dVout=',dVout/Vout(impt),' dVin=',dVin/Vin(impt)
+
+
+       if(n_nodes.le.(n_nodes_wanted)) then
+          emin=eps
+       else
+          emax=eps
+       end if
+
+
+
+       iloop=iloop+1
+    end do
+    
+!     stop
+!     eps=0.5*(emin+emax)
+!     call compute_Q(Q,wf%N,eps,r,pot)
+!     impt=matching_point(Q,wf%N)
+!     iloop=1
+!     eta=2*cvg%ETA
+!     do while((iloop.le.param%loopmax).and.(abs(eta).gt.cvg%ETA))
+!        call compute_Q(Q,wf%N,eps,r,pot)
+!        impt=matching_point(Q,wf%N)
+!        Vout(1)=0.0; Vout(2)=0.001
+!        call numerov_integrate(outward,Q,Vout,wf%N,sqrd)
+!        Vin(mesh%N)=0.0; Vin(mesh%N-1)=0.001
+!        call numerov_integrate(inward,Q,Vin,wf%N,sqrd)
+
+
+!            open(unit=1,file="numerov.dat",form='formatted',status='unknown')
+!            do i=1,wf%N
+!               write(1,*) r(i),Vout(i),Vin(i)
+!            end do
+!            close(1)
+
+    
+!        Iout=0.0
+!        do i=1,impt-1
+!           Iout=Iout+0.5*mesh%dx*(Vout(i)**2+Vout(i+1)**2)
+!        end do
+!        Iin=0.0
+!        do i=impt,wf%N-1
+!           Iin=Iin+0.5*mesh%dx*(Vin(i)**2+Vin(i+1)**2)
+!        end do
+       
+! !       deps=(dVin-dVout)/(Iout/Vout(impt)**2+Iin/Vin(impt)**2)
+!        deps=dVin/Vin(impt)-dVout/Vout(impt)
+!        deps=deps/(Iout/Vout(impt)**2+Iin/Vin(impt)**2)
+!        eta=eps-epsold  
+!        write(*,'(A,I4,A,F8.4,A,F8.4,A,F8.4,A,E12.6,A,E12.6,A,I4,A,E12.6,A,E12.6)') 'epsmax(',iloop,')=',eps,&
+!             ' [emin,emax]=[',emin,',',emax,'] eta=',eta,' deps=',deps,' impt=',impt,&
+!             ' dVout=',dVout/Vout(impt),' dVin=',dVin/Vin(impt)
+! !       print *,'eps(',iloop,')=',eps,deps,eta
+!        epsold=eps
+!        if(deps.lt.0.0) then
+!           emax=eps
+!        else
+!           emin=eps
+!        end if
+!        eps=0.5*(emin+emax)
+!        eps=eps-deps
+!        iloop=iloop+1
+!     end do
+!     print *,'eps(',iloop,')=',eps,deps,eta
+
+
+    wf%S(idxwfc)=eps
+    do i=1,impt
+       wf%wfc(i,idxwfc)=Vout(i)/Vout(impt)
+    end do
+    do i=impt+1,mesh%N
+       wf%wfc(i,idxwfc)=Vin(i)/Vin(impt)
+    end do
+    call norm(mesh,wf%wfc(:,idxwfc))
+    
+    
+    deallocate(Q)
+    deallocate(Vin)
+    deallocate(Vout)
+      
+
+    end subroutine numerov_step
+
+    ! --------------------------------------------------------------------------------------
+    !
+    !             matching_point()
+    !
+    ! --------------------------------------------------------------------------------------
+    function matching_point(Q,N)
+!      function matching_point(Q,N,eps,r,pot)
+      implicit none
+      integer::N
+      double precision::Q(:)!,r(:),eps
+      !type(t_potential)::pot
+      integer::matching_point,i
+      !      call compute_Q(Q,N,eps,r,pot)
+      matching_point=-1
+      do i=2,N-1
+         if((Q(i)*Q(i+1)).le.0) then
+            !     print *,i,pot%tot(i),Q(i),Q(i+1)
+            if(matching_point.lt.0)          matching_point=i
+         end if
+      end do
+    end function matching_point
+    ! --------------------------------------------------------------------------------------
+    !
+    !             compute_Q()
+    !
+    ! --------------------------------------------------------------------------------------
+    subroutine compute_Q(Q,N,eps,r,pot)
+      double precision::Q(:),r(:),eps
+      type(t_potential)::pot
+    integer::N,i
+    Q(1)=10000.0
+    do i=2,N
+       Q(i)=2*(eps-pot%tot(i))
+    end do
+    open(unit=1,file="Q.dat",form='formatted',status='unknown')
+    do i=1,N
+       write(1,*) r(i),Q(i)
+    end do
+    close(1)
+
+  end subroutine compute_Q
+  ! --------------------------------------------------------------------------------------
+  !
+  !             n_nodes()
+  !
+  ! --------------------------------------------------------------------------------------
+  function count_nodes(V,N)
+    double precision::V(:)
+    integer::N
+    integer::count_nodes
+    count_nodes=0
+    do i=1,N-1
+       if((V(i)*V(i+1)).le.0) count_nodes=count_nodes+1
+    end do
+  end function count_nodes
+  ! --------------------------------------------------------------------------------------
+  !
+  !             Numerov_integrate()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine numerov_integrate(outward,Q,V,N,sqrd)
+    logical :: outward
+    double precision::Q(:),V(:)
+    double precision::t(3),sqrd
+    integer :: N,i
+
+    if(outward) then
+!       print *,'outward'
+       do i=2,N-1
+          t(1)=1.0+sqrd*Q(i+1)/12.0
+          t(2)=2*(1.0-5.0*sqrd*Q(i)/12.0)
+          t(3)=1.0+sqrd*Q(i-1)/12.0
+          V(i+1)=(t(2)*V(i)-t(3)*V(i-1))/t(1)
+       end do
+    else
+!       print *,'inward'
+       do i=N-1,2,-1
+          t(1)=1.0+sqrd*Q(i-1)/12.0
+          t(2)=2*(1.0-5.0*sqrd*Q(i)/12.0)
+          t(3)=1.0+sqrd*Q(i+1)/12.0
+          V(i-1)=(t(2)*V(i)-t(3)*V(i+1))/t(1)
+       end do
+    end if
+  end subroutine numerov_integrate
+  ! --------------------------------------------------------------------------------------
+  !
+  !             davidson()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine davidson(param,mesh,cvg,wf,pot,time_spent)
+    type(t_param)::param
+    type(t_mesh)::mesh
+    type(t_cvg)::cvg
+    type(t_potential)::pot
+    type(t_wavefunction)::wf
+    type(t_time)::time_spent
+    
+    integer :: nvec
+    integer,parameter :: seed = 86456
+    double precision,allocatable :: V(:,:) ! wavefunctions
+    integer :: iloop
+    !  nvecmin=2
+    nvec=param%nvecmin
+    allocate(V(mesh%N,nvec))
+    if (.not.(param%restart))   then
+       print *,"new calculation"
+       call init_basis_set(V,nvec,seed,mesh)
+    else
+       print *,'restart an old calculation'
+       call read_config(V,mesh,nvec)
+    end if
+    
+    iloop=1
+    cvg%ncvg=0
+    wf%Sprev(:)=0.0
+    wf%dS(:)=0.0
+    do while((iloop.le.param%loopmax).and.(cvg%ncvg.lt.cvg%nvec_to_cvg))
+       write(*,'(A)') 'Main > #######################################'     
+       write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
+       write(*,'(A)') 'Main > #######################################'     
+       call davidson_step(nvec,V,mesh,param%nvecmin,iloop,cvg,pot,time_spent,wf)
+    end do
+    call save_config(V,mesh,param%nvecmin)
+    
+    
+    !--------------------------------------------------------------------------
+    !
+    ! save the wavefunctions
+    !
+    !--------------------------------------------------------------------------
+    call save_wavefunction(param,mesh,V,wf)
+    deallocate(V)
+  end subroutine davidson
+  ! --------------------------------------------------------------------------------------
+  !
   !              calc_coeff()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine calc_coeff(param,V,pot,mesh,wf,perturb)
+  subroutine calc_coeff(param,pot,mesh,wf,perturb)
     implicit none
     type(t_perturb)::perturb
     type(t_wavefunction)::wf
     type(t_mesh)::mesh
     type(t_potential)::pot
-    double precision::V(:,:)
     type(t_param)::param
     integer::i,j
     do i=1,param%nvec_to_cvg
        do j=1,param%nvec_to_cvg
-          perturb%coeff(i,j)=mesh%dv*sum(V(:,i)*pot%perturb*V(:,j))
+          perturb%coeff(i,j)=mesh%dv*sum(wf%wfc(:,i)*pot%perturb*wf%wfc(:,j))
        end do
     end do
   end subroutine calc_coeff
   ! --------------------------------------------------------------------------------------
   !
-  !              save_wavefunction(param,mesh,V)
+  !              save_wavefunction(param,mesh,V,wf)
   !
   ! --------------------------------------------------------------------------------------
-  subroutine save_wavefunction(param,mesh,V)
+  subroutine save_wavefunction(param,mesh,V,wf)
     implicit none
     type(t_param)::param
     type(t_mesh)::mesh
     double precision::V(:,:)
+    type(t_wavefunction)::wf
     
     integer :: i,j,k
     character (len=1024) :: filecube
-
-    do i=1,param%nvecini
+    
+    do i=1,param%nvecmin
        call norm(mesh,V(:,i))
+       call dcopy(wf%N,V(:,i),1,wf%wfc(:,i),1)
        if(mesh%dim.eq.3) then    ! 3D
           write(filecube,'(a,i0,a)') 'evec',i,'.cube'
           call save_cube_3D(V(:,i),filecube,mesh)
@@ -256,7 +695,7 @@ contains
     param%ieof=0
     param%loopmax=1000
     param%restart=.FALSE.
-    param%nvecini=20
+    param%nvecmin=20
     param%nvecmax=41
     param%Nx=30
     param%nvec_to_cvg=20
@@ -281,8 +720,8 @@ contains
        if(line(1:eqidx-1).eq."loopmax") then
           read(line(eqidx+1:lline),*) param%loopmax
        end if
-       if(line(1:eqidx-1).eq."nvecini") then
-          read(line(eqidx+1:lline),*) param%nvecini
+       if(line(1:eqidx-1).eq."nvecmin") then
+          read(line(eqidx+1:lline),*) param%nvecmin
        end if
        if(line(1:eqidx-1).eq."nvecmax") then
           read(line(eqidx+1:lline),*) param%nvecmax
@@ -315,7 +754,7 @@ contains
 
     print *,'#restart=',param%restart
     print *,'#loopmax=',param%loopmax
-    print *,'#nvecini=',param%nvecini
+    print *,'#nvecmin=',param%nvecmin
     print *,'#nvecmax=',param%nvecmax
     print *,'#ETA=',param%ETA
     print *,'#nvec_to_cvg=',param%nvec_to_cvg
@@ -334,14 +773,14 @@ contains
   ! subroutine to save the configuration of the calculation in order to restart it
   ! later if necessary
   ! --------------------------------------------------------------------------------------
-  subroutine save_config(V,m,nvecini)
+  subroutine save_config(V,m,nvecmin)
     implicit none
     type(t_mesh)::m
     double precision :: V(:,:)
-    integer::nvecini,i,j
+    integer::nvecmin,i,j
     open(unit=1,file="evectors.dat",form='formatted',status='unknown')
     do i=1,m%N
-       write(1,*) (V(i,j),j=1,nvecini)
+       write(1,*) (V(i,j),j=1,nvecmin)
     end do
     close(1)
   end subroutine save_config
@@ -350,17 +789,17 @@ contains
   !              read_config()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine read_config(V,m,nvecini)
+  subroutine read_config(V,m,nvecmin)
     implicit none
     type(t_mesh)::m
     double precision :: V(:,:)
-    integer::nvecini,i,j
+    integer::nvecmin,i,j
     logical :: file_exists
     INQUIRE(FILE="evectors.dat", EXIST=file_exists)
     if(file_exists) then
        open(unit=1,file="evectors.dat",form='formatted',status='unknown')
        do i=1,m%N
-          read(1,*) (V(i,j),j=1,nvecini)
+          read(1,*) (V(i,j),j=1,nvecmin)
        end do
        close(1)
     else
@@ -533,10 +972,10 @@ contains
   !              DAVIDSON()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine davidson(nvec,V,m,nvecini,iloop,cvg,pot,time_spent,wf)
+  subroutine davidson_step(nvec,V,m,nvecmin,iloop,cvg,pot,time_spent,wf)
     implicit none
     type(t_wavefunction)::wf
-    integer :: nvec,nvecini,iloop
+    integer :: nvec,nvecmin,iloop
     double precision,allocatable :: V(:,:)   !,pot_ext(:)
     type(t_mesh) :: m
     type(t_cvg)::cvg
@@ -568,15 +1007,15 @@ contains
     call cpu_time(time_spent%end_loc)
     call time_tracking_write(iloop,time_spent,'Davidson -> Diagonalization')
 
-    wf%S(1:nvecini)=S(1:nvecini)
-    wf%dS(:)=wf%S(1:nvecini)-wf%Sprev(:)
-    wf%Sprev(:)=wf%S(1:nvecini)
-    do i=1,nvecini
+    wf%S(1:nvecmin)=S(1:nvecmin)
+    wf%dS(:)=wf%S(1:nvecmin)-wf%Sprev(:)
+    wf%Sprev(:)=wf%S(1:nvecmin)
+    do i=1,nvecmin
        write(*,'(A,I6,A,F12.6,A,E12.2,A)') 'Main > Eigenvalue(',i,'): ',wf%S(i),'(',wf%dS(i),')'
     end do
     !call cpu_time(inter)
     open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
-    write(1,*) iloop,wf%S(1:nvecini)
+    write(1,*) iloop,wf%S(1:nvecmin)
     close(1)
     ! computation of the Ritz's vectors
     allocate(VRitz(m%N,nvec))
@@ -629,8 +1068,8 @@ contains
     if(newnvec.le.param%nvecmax) then
        nvec=newnvec
     else
-       print *,'Main > restart from nvecini'
-       nvec=nvecini
+       print *,'Main > restart from nvecmin'
+       nvec=nvecmin
     end if
     allocate(V(m%N,nvec))
     V(:,:)=Vnew(:,1:nvec)
@@ -645,7 +1084,7 @@ contains
     deallocate(delta)
     deallocate(Vnew)
     deallocate(cvg%list_cvg)
-  end subroutine davidson
+  end subroutine davidson_step
   ! --------------------------------------------------------------------------------------
   !
   !              SAVE_CUBE()
