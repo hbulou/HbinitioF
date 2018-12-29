@@ -1,29 +1,3 @@
-module time_tracking
-  implicit none
-  type t_time
-     real :: start,end,start_loc,end_loc
-  end type t_time
-contains
-  ! -----------------------------------------------
-  subroutine time_tracking_init(time_spent)
-    implicit none
-    type(t_time)::time_spent
-    call cpu_time(time_spent%start)
-    open(unit=1,file="dbg.dat",form='formatted',status='unknown')
-    write(1,*)
-    close(1)
-  end subroutine time_tracking_init
-  subroutine time_tracking_write(iloop,time_spent,text)
-    integer :: iloop
-    type(t_time)::time_spent
-    character (len=*) :: text
-    open(unit=1,file="dbg.dat",form='formatted',status='unknown',access='append')
-    write(1,'(A50,I4,F12.6,F12.6,F12.6)') text,iloop,time_spent%end_loc,&
-         time_spent%start_loc,time_spent%end_loc-time_spent%start_loc
-    close(1)
-  end subroutine time_tracking_write
-end module time_tracking
-
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -33,22 +7,19 @@ end module time_tracking
 program Hbinitio
   !$ use OMP_LIB
   use time_tracking
+  use global
+  use poten
+  use IO
+  use param_mod
+  use mesh_mod
   implicit none
-!  include 'mpif.h'
+  !  include 'mpif.h'
   !------------------------------------------
   type t_GramSchmidt
      integer :: nindep
      integer :: ndep ! number of linear dependencies discovered
   end type t_GramSchmidt
-  !------------------------------------------
-  type t_mesh
-     integer :: Nx,Ny,Nz,N
-     integer,allocatable :: list_neighbors(:,:),n_neighbors(:)
-     double precision :: dx,dy,dz,dv
-     double precision :: center(3)
-     integer :: dim
-  end type t_mesh
-  type(t_mesh) :: mesh
+  type(t_mesh) :: mesh,mesh2
   !------------------------------------------
   type t_cvg
      integer,allocatable:: list_cvg(:)
@@ -58,45 +29,26 @@ program Hbinitio
   end type t_cvg
   type(t_cvg) :: cvg
   type(t_time) :: time_spent
-  !------------------------------------------
-  type t_param
-     logical::restart
-     integer::ieof
-     integer::loopmax
-     integer::nvecmin
-     integer::nvecmax
-     integer::Nx
-     integer::nvec_to_cvg
-     double precision :: ETA
-     double precision::box_width
-     integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
-     double precision::Iperturb
-     double precision::sigma
-  end type t_param
-  type(t_param)::param
+  type(t_param)::param,param2
   !------------------------------------------
   type t_perturb
      double precision,allocatable::coeff(:,:)
   end type t_perturb
   type(t_perturb)::perturb
+  type (t_potential)::pot,pot2
+  type(t_wavefunction):: wf,wf2
   !------------------------------------------
-  type t_potential
-     double precision,allocatable :: ext(:) ! external potential
-     double precision,allocatable :: perturb(:) ! perturbation potential
-     double precision,allocatable :: tot(:) ! perturbation potential
-  end type t_potential
-  type (t_potential)::pot
-  !------------------------------------------
-  type t_wavefunction
-     double precision,allocatable::S(:)
-     double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
-     integer :: nwfc,N
-     double precision,allocatable::wfc(:,:)
-  end type t_wavefunction
-  type(t_wavefunction):: wf
-  !------------------------------------------
-  character (len=1024)::line
-  integer :: i,j
+  integer :: i,j,k,n,l
+  type t_pseudo
+     integer::n
+     integer :: npot,npotu
+     double precision :: a,b,zval
+     double precision,allocatable::r(:)
+     double precision,allocatable::pot(:,:)
+  end type t_pseudo
+  type(t_pseudo) :: pp
+
+  double precision::x,y,z
   !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -104,32 +56,58 @@ program Hbinitio
 !  call mpi_init(ierr )
 !  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
 !  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
+
+  open(unit=1,file="energy.dat",form='formatted',status='unknown')
+  write(1,*) ;  close(1)
+
   call read_param(param)
 
+  call read_pp(pp)
+  
+  call new_mesh(mesh,param)  
 
-  call init_mesh(mesh,param)  
-  allocate(pot%ext(mesh%N))
-  allocate(pot%perturb(mesh%N))
-  allocate(pot%tot(mesh%N))
-  call Vext(mesh,pot%ext)
-  call Vperturb(mesh,pot,param)
-  pot%tot=pot%ext !+pot%perturb
+  call init_pot(mesh,param,pot)
+  
+
+
   open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
   cvg%nvec_to_cvg=param%nvec_to_cvg
   allocate(perturb%coeff(cvg%nvec_to_cvg,cvg%nvec_to_cvg))
   cvg%ETA=param%ETA
-  wf%nwfc=param%nvecmin
-  wf%N=mesh%N
-  allocate(wf%S(wf%nwfc))
-  allocate(wf%Sprev(wf%nwfc))
-  allocate(wf%dS(wf%nwfc))
-  allocate(wf%wfc(wf%N,wf%nwfc))
 
-  call numerov(wf,pot,mesh)
-  
+  call new_wf(wf,param,mesh)
+!  call numerov(wf,pot,mesh)
+
   call davidson(param,mesh,cvg,wf,pot,time_spent)
 
 
+    call read_param(param2)
+    param2%dim=param%dim
+    param2%box_width=param%box_width
+    param2%Nx=param%Nx+10
+    param2%init_wf=.FALSE.
+    call new_mesh(mesh2,param2)  
+    call init_pot(mesh2,param2,pot2)
+    call new_wf(wf2,param2,mesh2)
+
+    do k=1,mesh2%Nz
+       do i=1,mesh2%Nx
+          do j=1,mesh2%Ny
+             n=j+(i-1)*mesh2%Ny+(k-1)*mesh2%Ny*mesh2%Nx;             
+             x=i*mesh2%dx
+             y=j*mesh2%dY
+             z=k*mesh2%dZ
+             do l=1,param2%nvecmin
+                wf2%wfc(n,l)=interpolate(x,y,z,mesh,wf,l)
+             end do
+          end do
+       end do
+    end do
+!    call save_cube_3D(wf2%wfc(:,1),'essai.cube',mesh2)
+ !   stop
+    call davidson(param2,mesh2,cvg,wf2,pot2,time_spent)
+    
+  stop
   !--------------------------------------------------------------------------
   !
   ! perturbation theory
@@ -143,9 +121,6 @@ program Hbinitio
   do i=1,cvg%nvec_to_cvg
      print *,(perturb%coeff(i,j),j=1,cvg%nvec_to_cvg)
   end do
-
-  
-  
   !--------------------------------------------------------------------------
   !
   ! end of Hbinitio
@@ -172,6 +147,91 @@ program Hbinitio
 contains
   ! --------------------------------------------------------------------------------------
   !
+  !             new_wf()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine new_wf(wf,param,mesh)
+    implicit none
+    type(t_wavefunction)::wf
+    type(t_param)::param
+    type(t_mesh)::mesh
+    wf%nwfc=param%nvecmin
+    wf%N=mesh%N
+    allocate(wf%S(wf%nwfc))
+    allocate(wf%Sprev(wf%nwfc))
+    allocate(wf%dS(wf%nwfc))
+    allocate(wf%wfc(wf%N,wf%nwfc))
+    allocate(wf%rho(wf%N))
+  end subroutine new_wf
+  ! --------------------------------------------------------------------------------------
+  !
+  !             interpolate()
+  !
+  ! --------------------------------------------------------------------------------------
+  function interpolate(x,y,z,mesh,wf,l)
+    implicit none
+    double precision::x,y,z
+    integer :: i,j,k,n,i0,j0,k0,i1,j1,k1
+    double precision::x0,y0,z0,x1,y1,z1
+    type(t_mesh)::mesh
+    type(t_wavefunction)::wf
+    integer,parameter::ndim=8
+    double precision::A(ndim,ndim),C(ndim)
+    integer::info,ipiv(ndim),l
+    double precision::interpolate
+    
+    i0=floor(x/mesh%dx)
+    j0=floor(y/mesh%dy)
+    k0=floor(z/mesh%dz)
+
+    i1=i0+1
+    j1=j0+1
+    k1=k0+1
+    x0=i0*mesh%dx
+    y0=j0*mesh%dy
+    z0=k0*mesh%dz
+    x1=i1*mesh%dx
+    y1=j1*mesh%dy
+    z1=k1*mesh%dz
+
+    i=1;     A(i,1)=1.0 ; A(i,2)=x0 ; A(i,3) = y0 ; A(i,4)=z0 ; A(i,5) = x0*y0 ; A(i,6)=x0*z0 ; A(i,7) = y0*z0 ; A(i,8) = x0*y0*z0
+    i=2;     A(i,1)=1.0 ; A(i,2)=x1 ; A(i,3) = y0 ; A(i,4)=z0 ; A(i,5) = x1*y0 ; A(i,6)=x1*z0 ; A(i,7) = y0*z0 ; A(i,8) = x1*y0*z0
+    i=3;     A(i,1)=1.0 ; A(i,2)=x0 ; A(i,3) = y1 ; A(i,4)=z0 ; A(i,5) = x0*y1 ; A(i,6)=x0*z0 ; A(i,7) = y1*z0 ; A(i,8) = x0*y1*z0
+    i=4;     A(i,1)=1.0 ; A(i,2)=x1 ; A(i,3) = y1 ; A(i,4)=z0 ; A(i,5) = x1*y1 ; A(i,6)=x1*z0 ; A(i,7) = y1*z0 ; A(i,8) = x1*y1*z0
+    i=5;     A(i,1)=1.0 ; A(i,2)=x0 ; A(i,3) = y0 ; A(i,4)=z1 ; A(i,5) = x0*y0 ; A(i,6)=x0*z1 ; A(i,7) = y0*z1 ; A(i,8) = x0*y0*z1
+    i=6;     A(i,1)=1.0 ; A(i,2)=x1 ; A(i,3) = y0 ; A(i,4)=z1 ; A(i,5) = x1*y0 ; A(i,6)=x1*z1 ; A(i,7) = y0*z1 ; A(i,8) = x1*y0*z1
+    i=7;     A(i,1)=1.0 ; A(i,2)=x0 ; A(i,3) = y1 ; A(i,4)=z1 ; A(i,5) = x0*y1 ; A(i,6)=x0*z1 ; A(i,7) = y1*z1 ; A(i,8) = x0*y1*z1
+    i=8;     A(i,1)=1.0 ; A(i,2)=x1 ; A(i,3) = y1 ; A(i,4)=z1 ; A(i,5) = x1*y1 ; A(i,6)=x1*z1 ; A(i,7) = y1*z1 ; A(i,8) = x1*y1*z1
+
+    C=0.0
+    i=i0 ; j=j0 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(1)=wf%wfc(n,l)
+    i=i1 ; j=j0 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(2)=wf%wfc(n,l)
+    i=i0 ; j=j1 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(3)=wf%wfc(n,l)
+    i=i1 ; j=j1 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(4)=wf%wfc(n,l)
+    i=i0 ; j=j0 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(5)=wf%wfc(n,l)
+    i=i1 ; j=j0 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(6)=wf%wfc(n,l)
+    i=i0 ; j=j1 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(7)=wf%wfc(n,l)
+    i=i1 ; j=j1 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(8)=wf%wfc(n,l)
+
+    ! do i=1,8
+    !    print *,(A(i,j),j=1,8)
+    ! end do
+    ! do i=1,8
+    !    print *,C(i)
+    ! end do
+
+
+!    CALL DGETRS('N' ,  ndim ,  ndim, A , ndim , IPIV, C , ndim , INFO)
+    CALL DGESV( ndim , 1, A , ndim , IPIV, C , ndim , INFO)
+    ! print *,info
+    ! do i=1,8
+    !    print *,'C(',i,')=',C(i)
+    ! end do
+    interpolate=C(1)+C(2)*x+C(3)*y+C(4)*z+C(5)*x*y+C(6)*x*z+C(7)*y*z+C(8)*x*y*z
+
+  end function interpolate
+  ! --------------------------------------------------------------------------------------
+  !
   !             Numerov()
   !
   ! --------------------------------------------------------------------------------------
@@ -182,7 +242,10 @@ contains
 
     integer :: i,j,n_nodes_wanted,idxwfc,nwfc,l
     double precision,allocatable::r(:),rho(:)
-
+    integer::iloop,iloopmax
+    character (len=1024) :: filename
+    double precision::EHartree
+    
     allocate(r(wf%N))
     r(1)=1.0e-12
     do i=2,wf%N
@@ -192,31 +255,66 @@ contains
 
     ! V=rR=r^(l+1)*summation
     
-    l=0
-    do i=1,wf%N
-       pot%tot(i)=-1.0/r(i)+0.5*l*(l+1)/r(i)**2
+
+    iloopmax=20
+    do iloop=1,iloopmax
+       l=0
+       do i=1,wf%N
+          pot%tot(i)=-1.0/r(i)+0.5*l*(l+1)/r(i)**2+pot%hartree(i)
+       end do
+       print *,minval(pot%tot),maxval(pot%tot)
+       
+       nwfc=cvg%nvec_to_cvg
+
+       do i=1,nwfc
+          n_nodes_wanted=i       
+          idxwfc=i
+          call numerov_step(n_nodes_wanted,wf,r,cvg,param,idxwfc,pot,l)
+       end do
+       
+
+       
+
+       open(unit=1,file="energy.dat",form='formatted',status='unknown',access='append')
+       write(1,'(I0,F16.8,F16.8,F16.8)') iloop,wf%S(1),EHartree,2*wf%S(1)-EHartree
+       close(1)
+
+
+       
+       call serie(wf,mesh,r)
+       
+       call Hartree_cg(wf,mesh,r,pot)
+
+       ! Hartree energy
+       EHartree=0.0
+       do i=1,mesh%N-1
+          EHartree=EHartree+&
+               0.5*mesh%dx*(pot%hartree(i)*wf%wfc(i,1)**2+pot%hartree(i+1)*wf%wfc(i+1,1)**2)
+       end do
+       
+       do i=1,nwfc
+          print *,wf%S(i),' Ha=',27.211*wf%S(i),' eV'
+       end do
+
+
+       write(filename,'(a,i0,a)') 'wfc',iloop,'.dat'
+       open(unit=1,file=filename,form='formatted',status='unknown')
+       do i=1,mesh%N
+          write(1,*) r(i),(wf%wfc(i,j),j=1,nwfc)
+       end do
+       close(1)
+
+
+
+       write(filename,'(a,i0,a)') 'potential',iloop,'.dat'
+       open(unit=1,file=filename,form='formatted',status='unknown')
+       do i=1,mesh%N
+          write(1,*) r(i),pot%tot(i),pot%hartree(i),wf%rho(i)
+       end do
+       close(1)
+       
     end do
-    print *,minval(pot%tot),maxval(pot%tot)
     
-    nwfc=cvg%nvec_to_cvg
-    do i=1,nwfc
-       n_nodes_wanted=i       
-       idxwfc=i
-       call numerov_step(n_nodes_wanted,wf,r,cvg,param,idxwfc,pot,l)
-    end do
-
-    open(unit=1,file='numerov.dat',form='formatted',status='unknown')
-    do i=1,mesh%N
-       write(1,*) r(i),(wf%wfc(i,j),j=1,nwfc)
-    end do
-    close(1)
-
-    do i=1,nwfc
-       print *,wf%S(i),' Ha=',27.211*wf%S(i),' eV'
-    end do
-
-    call serie(wf,mesh,r)
-
 stop
     
     allocate(rho(wf%N))
@@ -239,26 +337,291 @@ stop
   end subroutine numerov
   ! --------------------------------------------------------------------------------------
   !
-  !             serie()
+  !             Hartree_cg() (conjugate gradient)
+  ! 
+  ! --------------------------------------------------------------------------------------
+  subroutine Hartree_cg(wf,mesh,r,pot)
+    implicit none
+    type(t_potential)::pot
+    double precision::r(:)
+    type(t_wavefunction)::wf
+    type(t_mesh)::mesh
+
+    integer :: i
+    double precision :: charge_inf
+    double precision,allocatable::source(:)
+    double precision,allocatable::U(:)
+    double precision,allocatable::b(:)
+
+    
+    
+    charge_inf=0.0
+    do i=1,mesh%N-1
+       charge_inf=charge_inf+0.5*mesh%dx*(wf%wfc(i,1)**2+wf%wfc(i+1,1)**2)
+    end do
+    print *,"charge @ infinite=",charge_inf 
+
+    allocate(source(mesh%N))
+    source(1)=0.0
+    wf%rho(1)=0.0
+    do i=2,mesh%N
+       source(i)=-wf%wfc(i+1,1)**2/r(i)
+       wf%rho(i)=source(i)/r(i)
+    end do
+
+    allocate(U(mesh%N))
+    U(1)=0.0
+    U(mesh%N)=charge_inf
+    do i=2,mesh%N-1
+       U(i)=U(1)+(i-1)*(U(mesh%N)-U(1))/(mesh%N-1)
+!       U(i)=rand()
+    end do
+
+    
+
+    
+    allocate(b(mesh%N))
+    do i=1,mesh%N
+       b(i)=source(i)
+    end do
+    b(2)=b(2)-U(1)/mesh%dx**2
+    b(mesh%N-1)=b(mesh%N-1)-U(mesh%N)/mesh%dx**2
+
+
+    pot%hartree(1)=0.0
+    pot%hartree(mesh%N)=charge_inf
+    do i=2,mesh%N
+       pot%hartree(i)=pot%hartree(i)*r(i)
+    end do
+
+    
+    call Conjugate_gradient(-b(2:mesh%N-1),pot%hartree(2:mesh%N-1),mesh%N-2,mesh%dx)    
+    
+    do i=2,mesh%N
+       pot%hartree(i)=pot%hartree(i)/r(i)
+    end do
+    
+    deallocate(b)
+    deallocate(source)
+    deallocate(U)
+  end subroutine Hartree_cg
+  ! --------------------------------------------------------------------------------------
   !
+  !             Conjugate_gradient()
+  ! 
+  ! --------------------------------------------------------------------------------------
+  subroutine Conjugate_gradient(b,x,n,h)
+    implicit none
+    double precision::b(:),x(:)
+    integer::n
+    double precision::h
+
+    double precision,allocatable::g(:)
+    double precision,allocatable::d(:)
+    double precision,allocatable::Ad(:)
+    double precision,allocatable::Ax(:)
+    double precision::alpha,beta,dAd,f,fold,cvg
+    integer::i,iloop,iloopmax
+    double precision, external :: ddot
+    allocate(g(n))
+    allocate(d(n))
+    allocate(Ad(n))
+    allocate(Ax(n))
+
+
+    
+    
+    g(1)=(x(2)-2*x(1))/h**2+b(1)
+    do i=2,n-1
+       g(i)=(x(i+1)-2*x(i)+x(i-1))/h**2+b(i)
+    end do
+    g(n)=(x(n-1)-2*x(n))/h**2+b(n)
+
+
+    call dcopy(n,g,1,d,1) ! g->d
+
+!    alpha=-1.0 ;    call dscal(n,alpha,d,1) ! d-> -d
+!    print *,ddot(n,d,1,d,1)
+!    stop
+
+    cvg=1.0e-8
+    fold=0.0
+    f=2*cvg
+    iloopmax=10000
+    iloop=1
+    do while(.not.((iloop.le.iloopmax).and.(abs(f-fold).lt.cvg))) 
+!       do iloop=1,iloopmax
+
+       Ad(1)=(d(2)-2*d(1))/h**2
+       do i=2,n-1
+          Ad(i)=(d(i+1)-2*d(i)+d(i-1))/h**2
+       end do
+       Ad(n)=(d(n-1)-2*d(n))/h**2
+
+       dAd=ddot(n,d,1,Ad,1)
+       alpha=-ddot(n,g,1,d,1)/dAd
+       
+       call daxpy(n,alpha,d,1,x,1)  ! x+alpha*d -> x
+
+
+
+       
+       call daxpy(n,alpha,Ad,1,g,1) ! g+alpha*Ad -> g 
+
+
+       fold=f
+       f=ddot(n,b,1,x,1)
+       Ax(1)=(x(2)-2*x(1))/h**2
+       do i=2,n-1
+          Ax(i)=(x(i+1)-2*x(i)+x(i-1))/h**2
+       end do
+       Ax(n)=(x(n-1)-2*x(n))/h**2
+       f=f+0.5*ddot(n,x,1,Ax,1)
+!       print *,iloop,f,abs(f-fold),ddot(n,g,1,g,1)
+
+
+       beta=ddot(n,g,1,Ad,1)/dAd
+       call dscal(n,beta,d,1) ! beta*d-> d
+       alpha=-1.0
+       call daxpy(n,alpha,g,1,d,1) ! -g+d -> d 
+       iloop=iloop+1
+       if(iloop.eq.iloopmax) then
+          print *,"ERROR in COnjugtae_gradient"
+          stop
+       end if
+    end do
+    
+    deallocate(g)
+    deallocate(d)
+    deallocate(Ad)
+    deallocate(Ax)
+  end subroutine Conjugate_gradient
+  ! --------------------------------------------------------------------------------------
+  !
+  !             Conjugate_gradient_3D()
+  ! 
+  ! --------------------------------------------------------------------------------------
+  subroutine Conjugate_gradient_3D(b,x,n,h,m)
+    implicit none
+    double precision::b(:),x(:)
+    integer::n
+    double precision::h,hsqr
+    type(t_mesh)::m
+
+    double precision,allocatable::g(:)
+    double precision,allocatable::d(:)
+    double precision,allocatable::Ad(:)
+    double precision,allocatable::Ax(:)
+    double precision::alpha,beta,dAd,f,fold,cvg
+    integer::i,iloop,iloopmax,l
+    character (len=1024) :: filecube
+
+    double precision, external :: ddot
+    allocate(g(n))
+    allocate(d(n))
+    allocate(Ad(n))
+    allocate(Ax(n))
+    hsqr=h**2
+
+    
+    
+    do i=1,n
+       g(i)=-2*m%dim*x(i)/hsqr
+       do l=1,m%n_neighbors(i)
+          g(i)=g(i)+x(m%list_neighbors(i,l))/hsqr
+       end do
+       g(i)=g(i)+b(i)
+    end do
+
+
+
+    call dcopy(n,g,1,d,1) ! g->d
+
+!    alpha=-1.0 ;    call dscal(n,alpha,d,1) ! d-> -d
+!    print *,ddot(n,d,1,d,1)
+!    stop
+
+    cvg=1.0e-8
+    fold=0.0
+    f=2*cvg
+    iloopmax=10000
+    iloop=1
+    do while(.not.((iloop.le.iloopmax).and.(abs(f-fold).lt.cvg))) 
+!       do iloop=1,iloopmax
+
+
+       do i=1,n
+          Ad(i)=-2*m%dim*d(i)/hsqr
+          do l=1,m%n_neighbors(i)
+             Ad(i)=Ad(i)+d(m%list_neighbors(i,l))/hsqr
+          end do
+        end do
+
+
+       dAd=ddot(n,d,1,Ad,1)
+       alpha=-ddot(n,g,1,d,1)/dAd
+       
+       call daxpy(n,alpha,d,1,x,1)  ! x+alpha*d -> x
+
+
+
+       
+       call daxpy(n,alpha,Ad,1,g,1) ! g+alpha*Ad -> g 
+
+
+       fold=f
+       f=ddot(n,b,1,x,1)
+       print *,f-fold
+       Ax(1)=(x(2)-2*x(1))/h**2
+       do i=2,n-1
+          Ax(i)=(x(i+1)-2*x(i)+x(i-1))/h**2
+       end do
+       Ax(n)=(x(n-1)-2*x(n))/h**2
+       f=f+0.5*ddot(n,x,1,Ax,1)
+!       print *,iloop,f,abs(f-fold),ddot(n,g,1,g,1)
+
+
+       beta=ddot(n,g,1,Ad,1)/dAd
+       call dscal(n,beta,d,1) ! beta*d-> d
+       alpha=-1.0
+       call daxpy(n,alpha,g,1,d,1) ! -g+d -> d 
+       iloop=iloop+1
+       if(iloop.eq.iloopmax) then
+          print *,"ERROR in COnjugtae_gradient"
+          stop
+       end if
+    end do
+
+    write(filecube,'(a)') 'hartee.cube'
+    call save_cube_3D(x,filecube,m)
+    
+    deallocate(g)
+    deallocate(d)
+    deallocate(Ad)
+    deallocate(Ax)
+  end subroutine Conjugate_gradient_3D
+  ! --------------------------------------------------------------------------------------
+  !
+  !             serie()
+  ! It allows us to compute the value of R(@r=0) from u(0)/0
   ! --------------------------------------------------------------------------------------
   subroutine serie(wf,mesh,r)
     implicit none
     type(t_mesh)::mesh
     type(t_wavefunction)::wf
-    integer, parameter :: nmax=3
+    integer, parameter :: nmax=5
     double precision, dimension(nmax) :: a
     double precision:: r(:)
     double precision, dimension(nmax,nmax) :: b
     double precision :: som
-    integer :: i, j,info, lda, ldb, nrhs, n
+    integer :: i, j,info, lda, ldb, nrhs
     integer, dimension(nmax) :: ipiv
       
       
 
     do i=1,nmax
        do j=1,nmax
-          b(j,i)=r(1+i)**j  
+          b(i,j)=r(1+i)**j  
        end do
        a(i)=wf%wfc(1+i,1)
       end do
@@ -266,15 +629,29 @@ stop
       lda = nmax  ! leading dimension of a
       ldb = nmax  ! leading dimension of b
 
-      call dgesv(n, nrhs, b, lda, ipiv, a, ldb, info)
-      print *,'a=',a
+      call dgesv(nmax, nrhs, b, lda, ipiv, a, ldb, info)
+!      print *,'a=',a
 
-      som=0
-      do i=1,nmax
-         som=som+a(i)*(r(2)**i)
+!      print *,'-----------------------------------------'
+!      print *,'r ','u ','som'
+!      print *,'-----------------------------------------'
+      do j=1,nmax
+         som=0
+         do i=1,nmax
+            som=som+a(i)*(r(1+j)**i)
+         end do
+!         print *,r(1+j),wf%wfc(1+j,1),som
       end do
-      print *,r(2),wf%wfc(2,1),som
-      print *,r(:10)
+
+
+!    open(unit=1,file='R.dat',form='formatted',status='unknown')
+!    write(1,*) 0.0,a(1)
+!    do i=2,mesh%N
+!       write(1,*) r(i),wf%wfc(i,1)/r(i)
+!    end do
+!    close(1)
+
+
 
       ! Note: the solution is returned in b
       ! and a has been changed.
@@ -320,8 +697,8 @@ stop
        Vout(1)=0.0; Vout(2)=0.001
        call numerov_integrate(outward,Q,Vout,wf%N,sqrd)
        n_nodes=count_nodes(Vout,wf%N)
-       write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(0) eps(',iloop,')=',eps,&
-            ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+!       write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(0) eps(',iloop,')=',eps,&
+!            ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
        if(n_nodes.gt.n_nodes_wanted) then
           emax=eps
           facsign=eps-1.0
@@ -335,16 +712,16 @@ stop
           eps=facsign
        end if
     end do
-    write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(1) eps(',iloop,')=',eps,&
-         ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+!    write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(1) eps(',iloop,')=',eps,&
+!         ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
     do while(.not.(n_nodes.eq.(n_nodes_wanted+1)))
        eps=0.5*(emin+emax)
        call compute_Q(Q,wf%N,eps,r,pot)
        Vout(1)=0.0; Vout(2)=0.001
        call numerov_integrate(outward,Q,Vout,wf%N,sqrd)
        n_nodes=count_nodes(Vout,wf%N)
-       write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(2) eps(',iloop,')=',eps,&
-            ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+!       write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(2) eps(',iloop,')=',eps,&
+!            ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
        if(n_nodes.gt.(n_nodes_wanted+1)) then
           emax=eps
           facsign=eps-1.0
@@ -358,8 +735,8 @@ stop
           eps=facsign
        end if
     end do
-    write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(3) eps(',iloop,')=',eps,&
-         ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
+!    write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(3) eps(',iloop,')=',eps,&
+!         ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
 !    stop
 
     ! Energy levels of Hydrogen atom
@@ -401,9 +778,9 @@ stop
        !write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(2) eps(',iloop,')=',eps,&
        !     ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
 
-       write(*,'(A,I4,A,F8.4,A,F8.4,A,F8.4,A,E12.6,A,E12.6,A,I4,A,E12.6,A,E12.6)') 'epsmax(',iloop,')=',eps,&
-            ' [emin,emax]=[',emin,',',emax,'] eta=',eta,' deps=',deps,' impt=',impt,&
-            ' dVout=',dVout/Vout(impt),' dVin=',dVin/Vin(impt)
+ !      write(*,'(A,I4,A,F8.4,A,F8.4,A,F8.4,A,E12.6,A,E12.6,A,I4,A,E12.6,A,E12.6)') 'epsmax(',iloop,')=',eps,&
+  !          ' [emin,emax]=[',emin,',',emax,'] eta=',eta,' deps=',deps,' impt=',impt,&
+   !         ' dVout=',dVout/Vout(impt),' dVin=',dVin/Vin(impt)
 
 
        if(n_nodes.le.(n_nodes_wanted)) then
@@ -415,6 +792,10 @@ stop
 
 
        iloop=iloop+1
+       if(iloop.eq.param%loopmax) then
+          print *,"ERROR in numerov_step"
+          stop
+       end if
     end do
     
 !     stop
@@ -546,9 +927,9 @@ stop
   !             Numerov_integrate()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine numerov_integrate(outward,Q,V,N,sqrd)
+  subroutine numerov_integrate(outward,Q,y,N,sqrd)
     logical :: outward
-    double precision::Q(:),V(:)
+    double precision::Q(:),y(:)
     double precision::t(3),sqrd
     integer :: N,i
 
@@ -558,7 +939,7 @@ stop
           t(1)=1.0+sqrd*Q(i+1)/12.0
           t(2)=2*(1.0-5.0*sqrd*Q(i)/12.0)
           t(3)=1.0+sqrd*Q(i-1)/12.0
-          V(i+1)=(t(2)*V(i)-t(3)*V(i-1))/t(1)
+          y(i+1)=(t(2)*y(i)-t(3)*y(i-1))/t(1)
        end do
     else
 !       print *,'inward'
@@ -566,7 +947,7 @@ stop
           t(1)=1.0+sqrd*Q(i-1)/12.0
           t(2)=2*(1.0-5.0*sqrd*Q(i)/12.0)
           t(3)=1.0+sqrd*Q(i+1)/12.0
-          V(i-1)=(t(2)*V(i)-t(3)*V(i+1))/t(1)
+          y(i-1)=(t(2)*y(i)-t(3)*y(i+1))/t(1)
        end do
     end if
   end subroutine numerov_integrate
@@ -586,16 +967,36 @@ stop
     integer :: nvec
     integer,parameter :: seed = 86456
     double precision,allocatable :: V(:,:) ! wavefunctions
-    integer :: iloop
+    double precision::normloc
+    double precision, external :: ddot
+    integer :: iloop,i,lorb
     !  nvecmin=2
     nvec=param%nvecmin
     allocate(V(mesh%N,nvec))
-    if (.not.(param%restart))   then
-       print *,"new calculation"
-       call init_basis_set(V,nvec,seed,mesh)
+    if (param%init_wf)   then
+       if (.not.(param%restart))   then
+          print *,"new calculation"
+          call init_basis_set(V,nvec,seed,mesh)
+       else
+          print *,'restart an old calculation'
+          call read_config(V,mesh,nvec)
+       end if
     else
-       print *,'restart an old calculation'
-       call read_config(V,mesh,nvec)
+       !do i=1,mesh%N
+          do lorb=1,param%nvecmin
+             call dcopy(mesh%N,wf%wfc(:,lorb),1,V(:,lorb),1) ! g->d
+             normloc=ddot(mesh%N,V(:,lorb),1,V(:,lorb),1)
+             normloc=1.0/sqrt(normloc)
+             call dscal(mesh%N,normloc,V(:,lorb),1)
+
+             !V(i,lorb)=wf%wfc(i,lorb)
+          end do
+       !end do
+
+
+!!
+ !      call check_ortho(V,nvec,mesh)
+!       stop
     end if
     
     iloop=1
@@ -607,6 +1008,11 @@ stop
        write(*,'(A,I4,A)') 'Main > ############ scf loop=',iloop,' ############'
        write(*,'(A)') 'Main > #######################################'     
        call davidson_step(nvec,V,mesh,param%nvecmin,iloop,cvg,pot,time_spent,wf)
+
+       call compute_density(wf,param,V,mesh)
+       call read_param(param)
+       cvg%ETA=param%ETA
+       
     end do
     call save_config(V,mesh,param%nvecmin)
     
@@ -621,355 +1027,7 @@ stop
   end subroutine davidson
   ! --------------------------------------------------------------------------------------
   !
-  !              calc_coeff()
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine calc_coeff(param,pot,mesh,wf,perturb)
-    implicit none
-    type(t_perturb)::perturb
-    type(t_wavefunction)::wf
-    type(t_mesh)::mesh
-    type(t_potential)::pot
-    type(t_param)::param
-    integer::i,j
-    do i=1,param%nvec_to_cvg
-       do j=1,param%nvec_to_cvg
-          perturb%coeff(i,j)=mesh%dv*sum(wf%wfc(:,i)*pot%perturb*wf%wfc(:,j))
-       end do
-    end do
-  end subroutine calc_coeff
-  ! --------------------------------------------------------------------------------------
-  !
-  !              save_wavefunction(param,mesh,V,wf)
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine save_wavefunction(param,mesh,V,wf)
-    implicit none
-    type(t_param)::param
-    type(t_mesh)::mesh
-    double precision::V(:,:)
-    type(t_wavefunction)::wf
-    
-    integer :: i,j,k
-    character (len=1024) :: filecube
-    
-    do i=1,param%nvecmin
-       call norm(mesh,V(:,i))
-       call dcopy(wf%N,V(:,i),1,wf%wfc(:,i),1)
-       if(mesh%dim.eq.3) then    ! 3D
-          write(filecube,'(a,i0,a)') 'evec',i,'.cube'
-          call save_cube_3D(V(:,i),filecube,mesh)
-       else if(mesh%dim.eq.2) then   ! 2D
-          write(filecube,'(a,i0,a)') 'evec',i,'.dat'
-          open(unit=1,file=filecube,form='formatted',status='unknown')
-          do j=1,mesh%Nx
-             do k=1,mesh%Ny
-                write(1,*) j*mesh%dx,k*mesh%dy,V(j+(k-1)*mesh%Nx,i)
-             end do
-          end do
-          close(1)
-       else if(mesh%dim.eq.1) then  ! 1D
-          write(filecube,'(a,i0,a)') 'evec',i,'.dat'
-          open(unit=1,file=filecube,form='formatted',status='unknown')
-          do j=1,mesh%N
-             write(1,*) j*mesh%dx,V(j,i)
-          end do
-          close(1)
-       else
-          print *,' STOP in main(): dimension=',mesh%dim,' not yet implemented!'
-          stop
-       end if
-    end do
-  end subroutine save_wavefunction
-  ! --------------------------------------------------------------------------------------
-  !
-  !              read_param()
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine read_param(param)
-    implicit none
-    type(t_param)::param
-    integer::lline,eqidx
-    double precision, parameter :: pi=3.1415927
-
-    param%ieof=0
-    param%loopmax=1000
-    param%restart=.FALSE.
-    param%nvecmin=20
-    param%nvecmax=41
-    param%Nx=30
-    param%nvec_to_cvg=20
-    param%ETA=1.0e-3
-    param%dim=1
-    param%box_width=pi/sqrt(2.0)
-    param%Iperturb=1.0
-    param%sigma=1.0
-    open(unit=1,file='inp',form='formatted')
-    do while(.not.(is_iostat_end(param%ieof)))
-       read(1,*,iostat=param%ieof) line
-       lline=len_trim(line)
-       eqidx=index(line,"=")
-       print *,'###',eqidx,lline
-       if(line(1:eqidx-1).eq."restart") then
-          if(line(eqidx+1:lline).eq.'.TRUE.') then
-             param%restart=.TRUE.
-          else
-             param%restart=.FALSE.
-          end if
-       end if
-       if(line(1:eqidx-1).eq."loopmax") then
-          read(line(eqidx+1:lline),*) param%loopmax
-       end if
-       if(line(1:eqidx-1).eq."nvecmin") then
-          read(line(eqidx+1:lline),*) param%nvecmin
-       end if
-       if(line(1:eqidx-1).eq."nvecmax") then
-          read(line(eqidx+1:lline),*) param%nvecmax
-       end if
-       if(line(1:eqidx-1).eq."Nx") then
-          read(line(eqidx+1:lline),*) param%nx
-       end if
-       if(line(1:eqidx-1).eq."ETA") then
-          read(line(eqidx+1:lline),*) param%ETA
-       end if
-       if(line(1:eqidx-1).eq."nvec_to_cvg") then
-          read(line(eqidx+1:lline),*) param%nvec_to_cvg
-       end if
-       if(line(1:eqidx-1).eq."box_width") then
-          read(line(eqidx+1:lline),*) param%box_width
-       end if
-       if(line(1:eqidx-1).eq."dimension") then
-          read(line(eqidx+1:lline),*) param%dim
-       end if
-       if(line(1:eqidx-1).eq."sigma") then
-          read(line(eqidx+1:lline),*) param%sigma
-       end if
-       if(line(1:eqidx-1).eq."Iperturb") then
-          read(line(eqidx+1:lline),*) param%Iperturb
-       end if
-       line=''
-    end do
-    close(1)
-
-
-    print *,'#restart=',param%restart
-    print *,'#loopmax=',param%loopmax
-    print *,'#nvecmin=',param%nvecmin
-    print *,'#nvecmax=',param%nvecmax
-    print *,'#ETA=',param%ETA
-    print *,'#nvec_to_cvg=',param%nvec_to_cvg
-    print *,'#box_width=',param%box_width
-    print *,'#Nx=',param%nx
-    print *,'#dh=',param%box_width/(param%Nx+1)
-    print *,'#Dimension of the mesh=',param%dim
-    print *,'#Magnitude of the perturbation=',param%Iperturb
-    print *,'#Spread of the perturbation=',param%sigma
-
-  end subroutine read_param
-  ! --------------------------------------------------------------------------------------
-  !
-  !                             save_config()
-  !
-  ! subroutine to save the configuration of the calculation in order to restart it
-  ! later if necessary
-  ! --------------------------------------------------------------------------------------
-  subroutine save_config(V,m,nvecmin)
-    implicit none
-    type(t_mesh)::m
-    double precision :: V(:,:)
-    integer::nvecmin,i,j
-    open(unit=1,file="evectors.dat",form='formatted',status='unknown')
-    do i=1,m%N
-       write(1,*) (V(i,j),j=1,nvecmin)
-    end do
-    close(1)
-  end subroutine save_config
-  ! --------------------------------------------------------------------------------------
-  !
-  !              read_config()
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine read_config(V,m,nvecmin)
-    implicit none
-    type(t_mesh)::m
-    double precision :: V(:,:)
-    integer::nvecmin,i,j
-    logical :: file_exists
-    INQUIRE(FILE="evectors.dat", EXIST=file_exists)
-    if(file_exists) then
-       open(unit=1,file="evectors.dat",form='formatted',status='unknown')
-       do i=1,m%N
-          read(1,*) (V(i,j),j=1,nvecmin)
-       end do
-       close(1)
-    else
-       print *,"### ERROR ### evectors.dat doesn't exist"
-       stop
-    end if
-  end subroutine read_config
-  ! --------------------------------------------------------------------------------------
-  !
-  !              simpson()
-  !
-  ! --------------------------------------------------------------------------------------
-  function  simpson(m,f)
-    implicit none
-    type (t_mesh)::m
-    double precision::simpson
-    double precision :: f(:)
-    integer::i
-    simpson=0.0
-    do i=1,m%N-2,2
-       simpson=simpson+f(i)*f(i)+4*f(i+1)*f(i+1)+f(i+2)*f(i+2)
-    end do
-    simpson=m%dv*simpson/3.0
-  end function simpson
-  ! --------------------------------------------------------------------------------------
-  !
-  !              trapz()
-  !
-  ! --------------------------------------------------------------------------------------
-  function  trapz(m,f)
-    implicit none
-    type (t_mesh)::m
-    double precision::trapz
-    double precision :: f(:)
-    integer::i
-     trapz=0.0
-    do i=1,m%N-1
-        trapz=trapz+f(i)*f(i)+f(i+1)*f(i+1)
-    end do
-    trapz=0.5*m%dv*trapz
-  end function trapz
-  ! --------------------------------------------------------------------------------------
-  !
-  !              norm()
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine  norm(m,evec) 
-    implicit none
-    double precision :: evec(:),normloc
-    double precision, external :: ddot
-    type(t_mesh)::m
-    if(m%dim.eq.3) then
-       normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
-    else if(m%dim.eq.2) then
-       normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
-    else    if(m%dim.eq.1) then
-       !       normloc=1.0/sqrt(trapz(m,evec))
-       !       print *,normloc,sqrt(trapz(m,evec))
-       normloc=1.0/sqrt(simpson(m,evec))
-    else
-       print *,' STOP in norm(): dimension=',m%dim,' not yet implemented!'
-       stop
-    end if
-    call dscal(m%N,normloc,evec(:),1)
-  end subroutine norm
-  ! --------------------------------------------------------------------------------------
-  !
-  !              Vperturb()
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine Vperturb(m,pot,param)
-    implicit none
-    type(t_mesh) :: m
-    type(t_param)::param
-    type(t_potential)::pot
-    double precision :: pts(3),rsqr
-
-    double precision, parameter :: pi=3.1415927
-    double precision :: invsig
-    double precision :: facperturb
-    integer :: i,j,nn
-
-    facperturb=param%Iperturb/sqrt(2*pi*param%sigma**2)
-    invsig=0.5/param%sigma**2
-    if(m%dim.eq.2) then
-       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
-       do i=1,m%Nx
-          pts(1)=i*m%dx
-          do j=1,m%Ny
-             pts(2)=j*m%dy
-             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2
-             nn=j+(i-1)*m%Ny
-             pot%perturb(nn)=facperturb*exp(-invsig*rsqr)
-             write(1,*) pts(1),pts(2),pot%perturb(nn)
-          end do
-       end do
-       close(1)
-    else        if(m%dim.eq.1) then
-       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
-       do i=1,m%Nx
-          pts(1)=i*m%dx
-          rsqr=(pts(1)-m%center(1))**2
-          pot%perturb(i)=facperturb*exp(-invsig*rsqr)
-          write(1,*) pts(1),pot%perturb(i)
-       end do
-       close(1)
-    else
-       print *,' STOP in Vperturb(): dimension=',m%dim,' not yet implemented!'
-       stop
-    end if
-  end subroutine Vperturb
-  ! --------------------------------------------------------------------------------------
-  !
-  !              Vext()
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine Vext(m,pot_ext)
-    implicit none
-    type(t_mesh) :: m
-    double precision :: pot_ext(:)
-    double precision :: pts(3),rsqr
-    
-    character (len=1024) :: filename
-    integer :: i,j,k,nn
-    if(m%dim.eq.3) then
-       do k=1,m%Nz
-          pts(3)=k*m%dz
-          do i=1,m%Nx
-             pts(1)=i*m%dx
-             do j=1,m%Ny
-                pts(2)=j*m%dy
-                rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2+(pts(3)-m%center(3))**2
-                nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
-                pot_ext(nn)=0.5*1.0*rsqr
-             end do
-          end do
-       end do
-       filename='pot_ext.cube'
-       call save_cube_3D(pot_ext,filename,m)
-    else if(m%dim.eq.2) then
-       open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
-       do i=1,m%Nx
-          pts(1)=i*m%dx
-          do j=1,m%Ny
-             pts(2)=j*m%dy
-             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2
-             nn=j+(i-1)*m%Ny
-             pot_ext(nn)=0.5*1.0*rsqr
-             write(1,*) pts(1),pts(2),pot_ext(nn)
-          end do
-       end do
-       close(1)
-    else    if(m%dim.eq.1) then
-       open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
-       do i=1,m%Nx
-          pts(1)=i*m%dx
-          rsqr=(pts(1)-m%center(1))**2
-          pot_ext(i)=.5*1.0*rsqr
-          write(1,*) pts(1),pot_ext(i)
-       end do
-       close(1)
-    else
-       print *,' STOP in Vext(): dimension=',m%dim,' not yet implemented!'
-       stop
-    end if
-       !stop
-  end subroutine Vext
-  ! --------------------------------------------------------------------------------------
-  !
-  !              DAVIDSON()
+  !              DAVIDSON_STEP()
   !
   ! --------------------------------------------------------------------------------------
   subroutine davidson_step(nvec,V,m,nvecmin,iloop,cvg,pot,time_spent,wf)
@@ -1087,45 +1145,158 @@ stop
   end subroutine davidson_step
   ! --------------------------------------------------------------------------------------
   !
-  !              SAVE_CUBE()
+  !              compute_density()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine save_cube_3D(data,filename,m)
-    implicit none
-    double precision :: data(:)
-!    integer :: idxmin,idxmax
-    type(t_mesh) :: m
-    character (len=1024) :: filename
-    
-    character(len=*),parameter :: FMT1='(I5,3F12.6)'
-    integer :: i,j,k,nn,ifield
-    
-    open(unit=1,file=filename,form='formatted',status='unknown')
-    write(1,*) ' Cubefile created from Hbinitio.f90 calculation'
-    write(1,*) ' H. Bulou, November 2018'
-    write(1,FMT1) 1,0.0,0.0,0.0
-    write(1,FMT1) m%Nx,m%dx,0.0,0.0
-    write(1,FMT1) m%Ny,0.0,m%dy,0.0
-    write(1,FMT1) m%Nz,0.0,0.0,m%dz
-    write(1,'(I5,4F12.6)') 1,1.0,0.0,0.0,0.0
-    do k=1,m%Nz
-       ifield=0
-       do i=1,m%Nx
-          do j=1,m%Ny
-             nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx               
-             write(1,'(E13.5)',advance='no') data(nn)
-             ifield=ifield+1
-             if (mod(ifield,6).eq.0) then
-                ifield=0
-                write(1,*)
-             end if
-          end do
+       subroutine compute_density(wf,param,V,mesh)
+         implicit none
+         type(t_wavefunction)::wf
+         type(t_param)::param
+         type(t_mesh)::mesh
+         double precision::V(:,:)
+         integer::i,j
+         double precision::charge
+         double precision,allocatable::b(:)
+
+         do j=1,param%noccstate
+            call dcopy(wf%N,V(:,j),1,wf%wfc(:,j),1)
+            call norm(mesh,wf%wfc(:,j))
+         end do
+
+
+
+         wf%rho=0.0
+         do j=1,param%noccstate
+            do i=1,mesh%N
+               wf%rho(i)=wf%rho(i)-wf%wfc(i,j)**2
+            end do
+         end do
+         charge=mesh%dv*sum(wf%rho)
+         print *,"Compute Density > Charge ",charge
+
+         do i=1,mesh%nbound
+            mesh%bound(i)%val=charge/mesh%bound(i)%d
+            !print *,mesh%bound(i)%q,mesh%bound(i)%val
+         end do
+         
+
+    allocate(b(mesh%N))
+    do i=1,mesh%N
+       b(i)=wf%rho(i)
+       do j=1,mesh%n_bound(i)
+          b(i)=b(i)+mesh%bound(mesh%list_bound(i,j))%val/mesh%dx**2
        end do
-       write(1,*)
+!       print *,b(i)
+    end do
+!    b(mesh%N-1)=b(mesh%N-1)-U(mesh%N)/mesh%dx**2
+!    call Conjugate_gradient_3D(-b,pot%hartree,mesh%N,mesh%dx,mesh)    
+  end subroutine compute_density
+  ! --------------------------------------------------------------------------------------
+  !
+  !              calc_coeff()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine calc_coeff(param,pot,mesh,wf,perturb)
+    implicit none
+    type(t_perturb)::perturb
+    type(t_wavefunction)::wf
+    type(t_mesh)::mesh
+    type(t_potential)::pot
+    type(t_param)::param
+    integer::i,j
+    do i=1,param%nvec_to_cvg
+       do j=1,param%nvec_to_cvg
+          perturb%coeff(i,j)=mesh%dv*sum(wf%wfc(:,i)*pot%perturb*wf%wfc(:,j))
+       end do
+    end do
+  end subroutine calc_coeff
+  ! --------------------------------------------------------------------------------------
+  !
+  !                             save_config()
+  !
+  ! subroutine to save the configuration of the calculation in order to restart it
+  ! later if necessary
+  ! --------------------------------------------------------------------------------------
+  subroutine save_config(V,m,nvecmin)
+    implicit none
+    type(t_mesh)::m
+    double precision :: V(:,:)
+    integer::nvecmin,i,j
+    open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+    do i=1,m%N
+       write(1,*) (V(i,j),j=1,nvecmin)
     end do
     close(1)
-  end subroutine save_cube_3D
+  end subroutine save_config
+  ! --------------------------------------------------------------------------------------
+  !
+  !              read_config()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine read_config(V,m,nvecmin)
+    implicit none
+    type(t_mesh)::m
+    double precision :: V(:,:)
+    integer::nvecmin,i,j
+    logical :: file_exists
+    INQUIRE(FILE="evectors.dat", EXIST=file_exists)
+    if(file_exists) then
+       open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+       do i=1,m%N
+          read(1,*) (V(i,j),j=1,nvecmin)
+       end do
+       close(1)
+    else
+       print *,"### ERROR ### evectors.dat doesn't exist"
+       stop
+    end if
+  end subroutine read_config
+  ! --------------------------------------------------------------------------------------
+  !
+  !              Vperturb()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine Vperturb(m,pot,param)
+    implicit none
+    type(t_mesh) :: m
+    type(t_param)::param
+    type(t_potential)::pot
+    double precision :: pts(3),rsqr
 
+    double precision, parameter :: pi=3.1415927
+    double precision :: invsig
+    double precision :: facperturb
+    integer :: i,j,nn
+
+    facperturb=param%Iperturb/sqrt(2*pi*param%sigma**2)
+    invsig=0.5/param%sigma**2
+    if(m%dim.eq.2) then
+       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
+       do i=1,m%Nx
+          pts(1)=i*m%dx
+          do j=1,m%Ny
+             pts(2)=j*m%dy
+             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2
+             nn=j+(i-1)*m%Ny
+             pot%perturb(nn)=facperturb*exp(-invsig*rsqr)
+             write(1,*) pts(1),pts(2),pot%perturb(nn)
+          end do
+       end do
+       close(1)
+    else        if(m%dim.eq.1) then
+       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
+       do i=1,m%Nx
+          pts(1)=i*m%dx
+          rsqr=(pts(1)-m%center(1))**2
+          pot%perturb(i)=facperturb*exp(-invsig*rsqr)
+          write(1,*) pts(1),pot%perturb(i)
+       end do
+       close(1)
+    else
+       print *,' STOP in Vperturb(): dimension=',m%dim,' not yet implemented!'
+       stop
+    end if
+  end subroutine Vperturb
   ! --------------------------------------------------------------------------------------
   !
   !              COMPUTE_DELTA()
@@ -1436,136 +1607,236 @@ stop
   end subroutine check_ortho
   
 
-  ! -----------------------------------------------
-  subroutine init_mesh(m,param)
-    implicit none
-    type(t_mesh)::m
-    type(t_param)::param
-    double precision:: Lwidth 
-    m%dim=param%dim
-    Lwidth=param%box_width
-    m%Nx=param%Nx
-    m%dx=Lwidth/(m%Nx+1)
-    if(m%dim.eq.3) then
-       m%Ny=m%Nx
-       m%Nz=m%Nx
-       m%dy=Lwidth/(m%Ny+1)
-       m%dz=Lwidth/(m%Nz+1)
-    else if(m%dim.eq.2) then
-       m%Ny=m%Nx
-       m%Nz=1
-       m%dy=Lwidth/(m%Ny+1)
-       m%dz=1.0
-    else   if(m%dim.eq.1) then
-       m%Ny=1
-       m%Nz=1
-       m%dy=1.0
-       m%dz=1.0
-    else
-       print *,' STOP in init_mesh(): dimension=',m%dim,' not yet implemented!'
-       stop
-    end if
-    m%N=m%Nx*m%Ny*m%Nz
-    m%dv=m%dx*m%dy*m%dz
-    m%center(1)=Lwidth/2
-    m%center(2)=Lwidth/2
-    m%center(3)=Lwidth/2
+  ! --------------------------------------------------------------------------------------
+  !
+  !             read_pp()
+  !
+  ! read pseudpopotential file
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine read_pp(pp)
+    type(t_pseudo)::pp
+    integer ::i,j
+    open(unit=1,file='/home/bulou/ownCloud/src/Octopus/octopus-7.1/share/pseudopotentials/PSF/H.psf',&
+         action="read",form='formatted',status='old')
+    read(1, *) 
+    read(1, *)
+    read(1, *) 
+    read(1,*) pp%npot, pp%npotu, pp%n, pp%b, pp%a, pp%zval
+    print *, pp%npot, pp%npotu, pp%n, pp%b, pp%a, pp%zval
+    ! add extra point for the zero
+    pp%n=pp%n+1
+    print *,pp%n
+    allocate(pp%r(pp%n))
+    allocate(pp%pot(pp%npot,pp%n))
+    pp%r(1)=0.0
+    read(1, *)
+    read(1,*) (pp%r(i),i=2,pp%n)
+    do i=1,pp%npot
+       read(1,*)
+       pp%pot(i,1)=0.0
+       read(1,*) (pp%pot(i,j),j=2,pp%n)
+    end do
+    ! do i=2,pp%n
+    !    read(1,*) pp%r(i)
+    !    print *,i,pp%r(i)
+    !    j=j+1
+    !    if(j.eq.4) then
+    !       read(1,*)
+    !       j=0
+    !    end if
+    ! end do
+
+    close(1)
+
+    do i=1,pp%npot
+       pp%pot(i,2:pp%n)=pp%pot(i,2:pp%n)/pp%r(2:pp%n)
+    end do
+    open(unit=1,file='pot.dat',form='formatted',status='unknown')
+    do i=1,pp%n
+       write(1,*) pp%r(i),(pp%pot(j,i),j=1,pp%npot)
+    end do
+    close(1)
+
+
+
+  end subroutine read_pp
+  ! --------------------------------------------------------------------------------------
+  !
+  !             Hartree_sd() (steepest descent)
+  ! 
+  ! --------------------------------------------------------------------------------------
+  ! subroutine Hartree2()
+  !   implicit none
+  !   integer ::n,i,j
+  !   double precision::alpha,dr,rmax
+  !   double precision,allocatable::source(:),b(:)
+  !   double precision,allocatable::U(:),grad(:),y(:)
+  !   double precision,allocatable::r(:)
+  !   integer,parameter :: seed = 86456
+  !   double precision, external :: ddot
+  !   call srand(seed)
+  !   n=1000
+  !   rmax=50.0
+  !   dr=rmax/(n-1)
+  !   allocate(source(n))
+  !   allocate(r(n))
+  !   allocate(b(n))
+  !   allocate(U(n))
+  !   allocate(grad(n))
+  !   allocate(y(n))
+  !   do i=1,n
+  !      r(i)=(i-1)*dr
+  !   end do
+  !   do i=1,n
+  !      source(i)=-4.0*r(i)*exp(-2.0*r(i))
+  !   end do
+
     
-    allocate(m%n_neighbors(m%N))
-    ! max number of neighbors. It depends on m%dim:
-    ! 2*m%dim=2  @1D
-    ! 2*m%dim=4  @2D
-    ! 2*m%dim=6  @3D
-    allocate(m%list_neighbors(m%N,2*m%dim)) !
-    m%list_neighbors(:,:)=0
-    m%n_neighbors(:)=0
-    call compute_list_neighbors(m)
-  end subroutine init_mesh
-  ! -----------------------------------------------
-  subroutine free_mesh(m)
-    implicit none
-    type(t_mesh) :: m
-    deallocate(m%n_neighbors)
-    deallocate(m%list_neighbors) !
-  end subroutine free_mesh
-  ! -----------------------------------------------
-  subroutine compute_list_neighbors(m)
-    implicit none
-    type(t_mesh) :: m
-    integer::i,j,k,nn
-    !integer,allocatable::n_neighbors(:),list_neighbors(:,:)
+  !   U(1)=0
+  !   do i=2,n-1
+  !      U(i)=rand()
+  !   end do
+  !   U(n)=1.0
 
-    if(m%dim.eq.3) then
-       do k=1,m%Nz
-          do i=1,m%Nx
-             do j=1,m%Ny
-                nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx
-                if (k>1) then 
-                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                   m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Nx*m%Ny
-                end if
-                if (k<m%Nz) then 
-                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                   m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Nx*m%Ny
-                end if
-                if (i>1) then 
-                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                   m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Ny
-                end if
-                if (i<m%Nx) then 
-                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                   m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Ny
-                end if
-                if (j>1) then 
-                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                   m%list_neighbors(nn,m%n_neighbors(nn))=nn-1
-                end if
-                if (j<m%Ny) then 
-                   m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                   m%list_neighbors(nn,m%n_neighbors(nn))=nn+1
-                end if
-             end do
-          end do
-       end do
-    else    if(m%dim.eq.2) then
-       do i=1,m%Nx
-          do j=1,m%Ny
-             nn=j+(i-1)*m%Ny
-             if (i>1) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn-m%Ny
-             end if
-             if (i<m%Nx) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn+m%Ny
-             end if
-             if (j>1) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn-1
-             end if
-             if (j<m%Ny) then 
-                m%n_neighbors(nn)=m%n_neighbors(nn)+1
-                m%list_neighbors(nn,m%n_neighbors(nn))=nn+1
-             end if
-          end do
-       end do
-    else if(m%dim.eq.1) then
-       do i=1,m%Nx
-          if (i>1) then 
-             m%n_neighbors(i)=m%n_neighbors(i)+1
-             m%list_neighbors(i,m%n_neighbors(i))=i-1
-          end if
-          if (i<m%Nx) then 
-             m%n_neighbors(i)=m%n_neighbors(i)+1
-             m%list_neighbors(i,m%n_neighbors(i))=i+1
-          end if
-       end do
-    else
-       print *,' STOP in compute_list_neighbors(): dimension=',m%dim,' not yet implemented!'
-       stop
-    end if
+  !   do i=2,n-1
+  !      b(i)=source(i)
+  !   end do
+  !   b(2)=source(2)-U(1)/dr**2
+  !   b(n-1)=source(n-1)-U(n)/dr**2
 
-  end subroutine compute_list_neighbors
+  !   grad(1)=0.0
+  !   grad(n)=0.0
+  !   y(1)=0.0
+  !   y(n)=0.0
+  !   do j=1,1000000
+  !      grad(2)=(U(3)-2*U(2))/dr**2-b(2)
+  !      do i=3,n-2
+  !         grad(i)=(U(i+1)-2*U(i)+U(i-1))/dr**2-b(i)
+  !      end do
+  !      grad(n-1)=(-2*U(n-1)+U(n-2))/dr**2-b(n-1)
+
+
+  !      y(2)=(grad(3)-2*grad(2))/dr**2
+  !      do i=3,n-2
+  !         y(i)=(grad(i+1)-2*grad(i)+grad(i-1))/dr**2
+  !      end do
+  !      y(n-1)=(-2*grad(n-1)+grad(n-2))/dr**2
+       
+  !      alpha=ddot(n,grad,1,grad,1)/ddot(n,grad,1,y,1)
+  !      print *,'alpha=',alpha ,ddot(n,grad,1,y,1),ddot(n,grad,1,grad,1)
+       
+  !      !    call dscal(mesh%N-2,-alpha,grad,1)
+  !      call daxpy(n,-alpha,grad,1,U,1)
+
+       
+  !   end do
+  !   U(1)=0.0
+  !   U(n)=1.0
+
+
+  !   open(unit=1,file='b.dat',form='formatted',status='unknown')
+  !   do i=1,n
+  !      write(1,*) r(i),source(i),-(r(i)+1)*exp(-2.0*r(i))+1,U(i)
+  !   end do
+    
+  ! end subroutine Hartree2
+  subroutine Hartree_sd(wf,mesh,r)
+    implicit none
+    double precision::r(:)
+    type(t_wavefunction)::wf
+    type(t_mesh)::mesh
+    double precision,allocatable::source(:),U(:),grad(:),y(:),b(:)
+    double precision::alpha,q
+    integer::i,j
+    double precision, external :: ddot
+    integer,parameter :: seed = 86456
+    character (len=1024) :: filesave
+
+    allocate(source(wf%N))
+    allocate(U(wf%N))
+    allocate(b(wf%N))
+    allocate(grad(wf%N))
+    allocate(y(wf%N))
+    call srand(seed)
+
+    q=0.0
+    do i=1,mesh%N-1
+       q=q+0.5*mesh%dx*(wf%wfc(i,1)**2+wf%wfc(i+1,1)**2)
+    end do
+    print *,"q=",q 
+
+    do i=2,mesh%N-1
+       U(i)=rand()
+    end do
+    U(1)=0.0
+    U(mesh%N)=q
+
+
+    do i=1,mesh%N
+       source(i)=-wf%wfc(i+1,1)**2/r(i+1)
+    end do
+
+
+    do i=1,mesh%N
+       b(i)=source(i)
+    end do
+    b(2)=b(2)-U(1)/mesh%dx**2
+    b(mesh%N-1)=b(mesh%N-1)-U(mesh%N)/mesh%dx**2
+
+
+
+    
+    grad(1)=0.0
+    grad(mesh%N)=0.0
+    y(1)=0.0
+    y(mesh%N)=0.0
+
+    
+    do j=1,100000000
+       grad(2)=(U(3)-2*U(2))/mesh%dx**2-b(2)
+       do i=3,mesh%N-2
+          grad(i)=(U(i+1)-2*U(i)+U(i-1))/mesh%dx**2-b(i)
+       end do
+       grad(mesh%N-1)=(-2*U(mesh%N-1)+U(mesh%N-2))/mesh%dx**2-b(mesh%N-1)
+       
+       y(2)=(grad(3)-2*grad(2))/mesh%dx**2
+       do i=3,mesh%N-2
+          y(i)=(grad(i+1)-2*grad(i)+grad(i-1))/mesh%dx**2
+       end do
+       y(mesh%N-1)=(-2*grad(mesh%N-1)+grad(mesh%N-2))/mesh%dx**2
+       
+       alpha=ddot(mesh%N,grad,1,grad,1)/ddot(mesh%N,grad,1,y,1)
+       print *,'alpha=',alpha,ddot(mesh%N,grad,1,y,1),ddot(mesh%N,grad,1,grad,1)
+       
+       !    call dscal(mesh%N-2,-alpha,grad,1)
+       call daxpy(mesh%N,-alpha,grad,1,U,1)
+
+       if(mod(j,10000).eq.0) then
+          write(filesave,'(a,i0,a)') 'b',j,'.dat'
+          open(unit=1,file=filesave,form='formatted',status='unknown')
+          do i=1,mesh%N
+             write(1,*) r(i),source(i-1),U(i)
+          end do
+       end if
+       
+    end do
+
+
+!    open(unit=1,file='b.dat',form='formatted',status='unknown')
+!    do i=1,mesh%N
+!       write(1,*) r(i),source(i-1),U(i)
+!    end do
+
+!    write(1,*) r(mesh%N),source(i-1),x(i)
+!    close(1)
+
+    
+    deallocate(y)
+    deallocate(grad)
+    deallocate(source)
+    deallocate(U)
+  end subroutine Hartree_sd
   
   
 end program Hbinitio
