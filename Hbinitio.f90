@@ -953,6 +953,25 @@ stop
   end subroutine numerov_integrate
   ! --------------------------------------------------------------------------------------
   !
+  !             V_from_wfc()
+  !
+  ! --------------------------------------------------------------------------------------
+       subroutine V_from_wfc(param,wf,mesh,V)
+         double precision, external :: ddot
+         integer :: lorb
+         type(t_param)::param
+         type(t_wavefunction)::wf
+         type(t_mesh)::mesh
+         double precision::V(:,:),normloc
+          do lorb=1,param%nvecmin
+             call dcopy(mesh%N,wf%wfc(:,lorb),1,V(:,lorb),1) ! g->d
+             normloc=ddot(mesh%N,V(:,lorb),1,V(:,lorb),1)
+             normloc=1.0/sqrt(normloc)
+             call dscal(mesh%N,normloc,V(:,lorb),1)
+          end do
+        end subroutine V_from_wfc
+  ! --------------------------------------------------------------------------------------
+  !
   !             davidson()
   !
   ! --------------------------------------------------------------------------------------
@@ -967,9 +986,9 @@ stop
     integer :: nvec
     integer,parameter :: seed = 86456
     double precision,allocatable :: V(:,:) ! wavefunctions
-    double precision::normloc
-    double precision, external :: ddot
-    integer :: iloop,i,lorb
+!    double precision::normloc
+ !   double precision, external :: ddot
+    integer :: iloop,i  !,lorb
     !  nvecmin=2
     nvec=param%nvecmin
     allocate(V(mesh%N,nvec))
@@ -982,21 +1001,9 @@ stop
           call read_config(V,mesh,nvec)
        end if
     else
-       !do i=1,mesh%N
-          do lorb=1,param%nvecmin
-             call dcopy(mesh%N,wf%wfc(:,lorb),1,V(:,lorb),1) ! g->d
-             normloc=ddot(mesh%N,V(:,lorb),1,V(:,lorb),1)
-             normloc=1.0/sqrt(normloc)
-             call dscal(mesh%N,normloc,V(:,lorb),1)
-
-             !V(i,lorb)=wf%wfc(i,lorb)
-          end do
-       !end do
-
-
-!!
- !      call check_ortho(V,nvec,mesh)
-!       stop
+       call V_from_wfc(param,wf,mesh,V)
+          !      call check_ortho(V,nvec,mesh)
+          !       stop
     end if
     
     iloop=1
