@@ -969,6 +969,9 @@ stop
              normloc=1.0/sqrt(normloc)
              call dscal(mesh%N,normloc,V(:,lorb),1)
           end do
+!    GS%nindep=1
+!    call GramSchmidt(V,Vdump,nvec,m,GS)
+
         end subroutine V_from_wfc
   ! --------------------------------------------------------------------------------------
   !
@@ -984,7 +987,6 @@ stop
     type(t_time)::time_spent
     
     integer :: nvec
-    integer,parameter :: seed = 86456
     double precision,allocatable :: V(:,:) ! wavefunctions
 !    double precision::normloc
  !   double precision, external :: ddot
@@ -995,13 +997,13 @@ stop
     if (param%init_wf)   then
        if (.not.(param%restart))   then
           print *,"new calculation"
-          call init_basis_set(V,nvec,seed,mesh)
+          call init_basis_set(V,nvec,mesh,wf,'rand')
        else
           print *,'restart an old calculation'
           call read_config(V,mesh,nvec)
        end if
     else
-       call V_from_wfc(param,wf,mesh,V)
+       call init_basis_set(V,nvec,mesh,wf,'wfc')
           !      call check_ortho(V,nvec,mesh)
           !       stop
     end if
@@ -1502,25 +1504,38 @@ stop
   !              INIT_BASIS_SET()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine init_basis_set(V,nvec,seed,m)
+  subroutine init_basis_set(V,nvec,m,wf,tag)
     implicit none
-    integer :: nvec,seed
+    integer :: nvec
     double precision,allocatable :: V(:,:)
     type(t_mesh)::m
+    type(t_wavefunction)::wf
+    character(len=*)::tag
 
     double precision, external :: ddot
     double precision ::normloc
     integer :: i,j
     double precision,allocatable :: Vdump(:,:)
     type(t_GramSchmidt) :: GS
+    integer,parameter :: seed = 86456
     
     allocate(Vdump(m%N,nvec))
-    call srand(seed)
-    do i=1,nvec
-       do j=1,m%N
-          Vdump(j,i)=rand()
+
+    if(tag.eq.'rand') then
+       print *,'Init_basis_set > Random initialization'
+       call srand(seed)
+       do i=1,nvec
+          do j=1,m%N
+             Vdump(j,i)=rand()
+          end do
        end do
-    end do
+    else
+       print *,'Init_basis_set >  wfc initialization'
+       do i=1,nvec
+          call dcopy(mesh%N,wf%wfc(:,i),1,Vdump(:,i),1) ! g->d
+       end do
+    end if
+
     do i=1,nvec
        normloc=ddot(m%N,Vdump(:,i),1,Vdump(:,i),1)
        normloc=1.0/sqrt(normloc)

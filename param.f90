@@ -18,7 +18,7 @@ contains
     param%ieof=0
     param%loopmax=1000
     param%restart=.FALSE.
-    param%restart=.TRUE.
+    param%init_wf=.TRUE.
     param%nvecmin=20
     param%nvecmax=41
     param%Nx=30
