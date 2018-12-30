@@ -62,7 +62,7 @@ program Hbinitio
 
   call read_param(param)
 
-  call read_pp(pp)
+!  call read_pp(pp)
   
   call new_mesh(mesh,param)  
 
