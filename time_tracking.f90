@@ -8,6 +8,8 @@ contains
   subroutine time_tracking_init(time_spent)
     implicit none
     type(t_time)::time_spent
+!    character (len=1024)::filedbg
+!    write(filenrj,'(a,a)') param%prefix(:len_trim(param%prefix)),'/dbg.dat'
     call cpu_time(time_spent%start)
     open(unit=1,file="dbg.dat",form='formatted',status='unknown')
     write(1,*)

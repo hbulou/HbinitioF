@@ -43,7 +43,7 @@ contains
     double precision :: pot_ext(:)
     double precision :: pts(3),rsqr
     
-    character (len=1024) :: filename
+!    character (len=1024) :: filename
     integer :: i,j,k,nn
     ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !
@@ -64,8 +64,6 @@ contains
              end do
           end do
        end do
-       filename='pot_ext.cube'
-       call save_cube_3D(pot_ext,filename,m)
     ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !
     !           2D

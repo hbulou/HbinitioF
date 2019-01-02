@@ -1,9 +1,12 @@
 restart=.TRUE.
+prefix='110'
 init_wf=.TRUE.
+extrapol=.TRUE.	
+extrap_add=20
 loopmax=1000
 nvecini=20
 nvecmax=41
-Nx=50
+Nx=40
 noccstate=1
 nvec_to_cvg=5
 ETA=1.0e-8

@@ -62,10 +62,10 @@ contains
        call norm(mesh,V(:,i))
        call dcopy(wf%N,V(:,i),1,wf%wfc(:,i),1)
        if(mesh%dim.eq.3) then    ! 3D
-          write(filecube,'(a,i0,a)') 'evec',i,'.cube'
+          write(filecube,'(a,a,i0,a)') param%prefix(:len_trim(param%prefix)),'/evec',i,'.cube'
           call save_cube_3D(V(:,i),filecube,mesh)
        else if(mesh%dim.eq.2) then   ! 2D
-          write(filecube,'(a,i0,a)') 'evec',i,'.dat'
+          write(filecube,'(a,a,i0,a)') param%prefix(:len_trim(param%prefix)),'/evec',i,'.dat'
           open(unit=1,file=filecube,form='formatted',status='unknown')
           do j=1,mesh%Nx
              do k=1,mesh%Ny

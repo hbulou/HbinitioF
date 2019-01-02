@@ -20,7 +20,10 @@ module global
      !------------------------------------------
   type t_param
      logical::restart
+     character(len=32)::prefix
      logical::init_wf
+     logical::extrapol
+     integer::extrap_add
      integer::ieof
      integer::loopmax
      integer::nvecmin

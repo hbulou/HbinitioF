@@ -47,7 +47,8 @@ program Hbinitio
      double precision,allocatable::pot(:,:)
   end type t_pseudo
   type(t_pseudo) :: pp
-
+  character (len=1024)::filenameeigen
+  character (len=1024)::filenrj
   double precision::x,y,z
   !  integer::ierr,my_id,num_procs
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -57,20 +58,23 @@ program Hbinitio
 !  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
 !  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
 
-  open(unit=1,file="energy.dat",form='formatted',status='unknown')
-  write(1,*) ;  close(1)
 
   call read_param(param)
+  write(filenrj,'(a,a)') param%prefix(:len_trim(param%prefix)),'/energy.dat'
+  open(unit=1,file=filenrj,form='formatted',status='unknown')
+  write(1,*) ;  close(1)
 
 !  call read_pp(pp)
   
   call new_mesh(mesh,param)  
 
   call init_pot(mesh,param,pot)
+!       filename='pot_ext.cube'
+!       call save_cube_3D(pot_ext,filename,m)
   
 
-
-  open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown'); write(1,*);  close(1)
+  write(filenameeigen,'(a,a)') param%prefix(:len_trim(param%prefix)),'/eigenvalues.dat'
+  open(unit=1,file=filenameeigen,form='formatted',status='unknown'); write(1,*);  close(1)
   cvg%nvec_to_cvg=param%nvec_to_cvg
   allocate(perturb%coeff(cvg%nvec_to_cvg,cvg%nvec_to_cvg))
   cvg%ETA=param%ETA
@@ -80,47 +84,47 @@ program Hbinitio
 
   call davidson(param,mesh,cvg,wf,pot,time_spent)
 
+  if(param%extrapol) then
+     call read_param(param2)
+     param2%dim=param%dim
+     param2%box_width=param%box_width
+     param2%Nx=param%Nx+param%extrap_add
+     param2%init_wf=.FALSE.
+     call new_mesh(mesh2,param2)  
+     call init_pot(mesh2,param2,pot2)
+     call new_wf(wf2,param2,mesh2)
+     
+     do k=1,mesh2%Nz
+        do i=1,mesh2%Nx
+           do j=1,mesh2%Ny
+              n=j+(i-1)*mesh2%Ny+(k-1)*mesh2%Ny*mesh2%Nx;             
+              x=i*mesh2%dx
+              y=j*mesh2%dY
+              z=k*mesh2%dZ
+              do l=1,param2%nvecmin
+                 wf2%wfc(n,l)=interpolate(x,y,z,mesh,wf,l)
+              end do
+           end do
+        end do
+     end do
+     !    call save_cube_3D(wf2%wfc(:,1),'essai.cube',mesh2)
+     !   stop
+     call davidson(param2,mesh2,cvg,wf2,pot2,time_spent)
+  endif
 
-    call read_param(param2)
-    param2%dim=param%dim
-    param2%box_width=param%box_width
-    param2%Nx=param%Nx+10
-    param2%init_wf=.FALSE.
-    call new_mesh(mesh2,param2)  
-    call init_pot(mesh2,param2,pot2)
-    call new_wf(wf2,param2,mesh2)
-
-    do k=1,mesh2%Nz
-       do i=1,mesh2%Nx
-          do j=1,mesh2%Ny
-             n=j+(i-1)*mesh2%Ny+(k-1)*mesh2%Ny*mesh2%Nx;             
-             x=i*mesh2%dx
-             y=j*mesh2%dY
-             z=k*mesh2%dZ
-             do l=1,param2%nvecmin
-                wf2%wfc(n,l)=interpolate(x,y,z,mesh,wf,l)
-             end do
-          end do
-       end do
-    end do
-!    call save_cube_3D(wf2%wfc(:,1),'essai.cube',mesh2)
- !   stop
-    call davidson(param2,mesh2,cvg,wf2,pot2,time_spent)
-    
-  stop
   !--------------------------------------------------------------------------
   !
   ! perturbation theory
   !
   !--------------------------------------------------------------------------
-  call calc_coeff(param,pot,mesh,wf,perturb)
-  do i=1,cvg%nvec_to_cvg
-     print *,perturb%coeff(i,i),perturb%coeff(i,i)+wf%S(i)
-  end do
+  ! call calc_coeff(param,pot,mesh,wf,perturb)
+  ! do i=1,cvg%nvec_to_cvg
+  !    print *,perturb%coeff(i,i),perturb%coeff(i,i)+wf%S(i)
+  ! end do
 
-  do i=1,cvg%nvec_to_cvg
-     print *,(perturb%coeff(i,j),j=1,cvg%nvec_to_cvg)
-  end do
+  ! do i=1,cvg%nvec_to_cvg
+  !    print *,(perturb%coeff(i,j),j=1,cvg%nvec_to_cvg)
+  ! end do
   !--------------------------------------------------------------------------
   !
   ! end of Hbinitio
@@ -275,7 +279,7 @@ contains
 
        
 
-       open(unit=1,file="energy.dat",form='formatted',status='unknown',access='append')
+       open(unit=1,file=filenrj,form='formatted',status='unknown',access='append')
        write(1,'(I0,F16.8,F16.8,F16.8)') iloop,wf%S(1),EHartree,2*wf%S(1)-EHartree
        close(1)
 
@@ -1019,11 +1023,11 @@ stop
        call davidson_step(nvec,V,mesh,param%nvecmin,iloop,cvg,pot,time_spent,wf)
 
        call compute_density(wf,param,V,mesh)
-       call read_param(param)
-       cvg%ETA=param%ETA
+!       call read_param(param)
+!       cvg%ETA=param%ETA
        
     end do
-    call save_config(V,mesh,param%nvecmin)
+    call save_config(V,mesh,param%nvecmin,param)
     
     
     !--------------------------------------------------------------------------
@@ -1081,7 +1085,7 @@ stop
        write(*,'(A,I6,A,F12.6,A,E12.2,A)') 'Main > Eigenvalue(',i,'): ',wf%S(i),'(',wf%dS(i),')'
     end do
     !call cpu_time(inter)
-    open(unit=1,file="eigenvalues.dat",form='formatted',status='unknown',access='append')
+    open(unit=1,file=filenameeigen,form='formatted',status='unknown',access='append')
     write(1,*) iloop,wf%S(1:nvecmin)
     close(1)
     ! computation of the Ritz's vectors
@@ -1181,8 +1185,9 @@ stop
             end do
          end do
          charge=mesh%dv*sum(wf%rho)
-         print *,"Compute Density > Charge ",charge
-
+         print *,"Compute density >  Charge ",charge
+         print *,"Compute density > mesh%dv=",mesh%dv
+         print *,"Compute density > mesh%Nx=",mesh%Nx
          do i=1,mesh%nbound
             mesh%bound(i)%val=charge/mesh%bound(i)%d
             !print *,mesh%bound(i)%q,mesh%bound(i)%val
@@ -1226,12 +1231,15 @@ stop
   ! subroutine to save the configuration of the calculation in order to restart it
   ! later if necessary
   ! --------------------------------------------------------------------------------------
-  subroutine save_config(V,m,nvecmin)
+  subroutine save_config(V,m,nvecmin,param)
     implicit none
     type(t_mesh)::m
+    type(t_param)::param
     double precision :: V(:,:)
     integer::nvecmin,i,j
-    open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+    character (len=1024)::filename
+    write(filename,'(a,a)') param%prefix(:len_trim(param%prefix)),'/evectors.dat'
+    open(unit=1,file=filename,form='formatted',status='unknown')
     do i=1,m%N
        write(1,*) (V(i,j),j=1,nvecmin)
     end do
@@ -1390,7 +1398,7 @@ stop
           end do
           r(i,j)=r(i,j)-S(j)*VRitz(i,j)
        end do
-       normloc=ddot(m%N,r(:,j),1,r(:,j),1)
+       normloc=m%dv*ddot(m%N,r(:,j),1,r(:,j),1)
        write(*,'(A,I4,A,E12.4,A,E12.4)',advance='no') 'Residual > r(',j,')= ',normloc,'/',cvg%ETA
        if (normloc.lt.cvg%ETA) then
           cvg%ncvg=cvg%ncvg+1

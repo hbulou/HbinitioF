@@ -17,8 +17,11 @@ contains
 
     param%ieof=0
     param%loopmax=1000
+    param%prefix='./'
     param%restart=.FALSE.
     param%init_wf=.TRUE.
+    param%extrapol=.FALSE.
+    param%extrap_add=10
     param%nvecmin=20
     param%nvecmax=41
     param%Nx=30
@@ -48,6 +51,16 @@ contains
           else
              param%init_wf=.FALSE.
           end if
+       end if
+       if(line(1:eqidx-1).eq."extrapol") then
+          if(line(eqidx+1:lline).eq.'.TRUE.') then
+             param%extrapol=.TRUE.
+          else
+             param%extrapol=.FALSE.
+          end if
+       end if
+       if(line(1:eqidx-1).eq."extrap_add") then
+          read(line(eqidx+1:lline),*) param%extrap_add
        end if
        if(line(1:eqidx-1).eq."loopmax") then
           read(line(eqidx+1:lline),*) param%loopmax
@@ -82,13 +95,26 @@ contains
        if(line(1:eqidx-1).eq."Iperturb") then
           read(line(eqidx+1:lline),*) param%Iperturb
        end if
+       if(line(1:eqidx-1).eq."prefix") then
+          read(line(eqidx+1:lline),*) param%prefix
+       end if
        line=''
     end do
     close(1)
 
 
+    print *,'#prefix=',param%prefix
+    call system("mkdir "//param%prefix)
+
+!    write(filename,'(a,a)') param%prefix(:len_trim(param%prefix)),'/evectors.dat'
+ !   print *,filename
+  !  open(unit=1,file=filename,form='formatted',status='unknown')
+   ! close(1)
+    !stop
     print *,'#restart=',param%restart
     print *,'#init_wf=',param%init_wf
+    print *,'#extrapol=',param%extrapol
+    print *,'#extrap_add=',param%extrap_add
     print *,'#loopmax=',param%loopmax
     print *,'#nvecmin=',param%nvecmin
     print *,'#nvecmax=',param%nvecmax
