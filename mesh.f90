@@ -1,5 +1,6 @@
 module mesh_mod
   use global
+  use param_mod
   implicit none
 contains
   ! -----------------------------------------------

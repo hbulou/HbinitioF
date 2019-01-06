@@ -5,9 +5,11 @@ module poten
   !------------------------------------------
   type t_potential
      double precision,allocatable :: ext(:) ! external potential
-     double precision,allocatable :: hartree(:) ! external potential
+     double precision,allocatable :: hartree(:) ! hartreel potential
+     double precision,allocatable :: Vx(:) ! exchange potential
      double precision,allocatable :: perturb(:) ! perturbation potential
      double precision,allocatable :: tot(:) ! perturbation potential
+     double precision::EX,Ehartree
   end type t_potential
   
 contains
@@ -25,7 +27,9 @@ contains
 
     allocate(pot%ext(mesh%N))
     allocate(pot%hartree(mesh%N))
+    allocate(pot%Vx(mesh%N))
     pot%hartree=0.0
+    pot%Vx=0.0
     allocate(pot%perturb(mesh%N))
     allocate(pot%tot(mesh%N))
     call Vext(mesh,pot%ext)

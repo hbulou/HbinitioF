@@ -1,6 +1,38 @@
 module param_mod
   use global
   implicit none
+  !------------------------------------------
+  type t_param
+     logical::restart
+     character(len=32)::scheme    ! numerov || davidson
+     character(len=32)::prefix
+     character (len=1024)::filenameeigen
+     character (len=1024)::filenrj
+     character (len=1024)::inputfile
+     logical::init_wf
+     logical::extrapol
+     integer::extrap_add
+     integer::ieof
+     integer::loopmax
+     integer::nvecmin
+     integer::nvecmax
+     integer::Nx
+     ! eigenvectors to converge
+     integer::nvec_to_cvg
+     integer,allocatable::list_idx_to_cvg(:)
+     integer::noccstate
+     double precision,allocatable::occupation(:)
+     ! accurency
+     double precision :: ETA
+     double precision::box_width
+     integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
+     double precision::Iperturb
+     double precision::sigma
+     logical:: hartree
+     logical::exchange
+     double precision::Z
+  end type t_param
+  
 contains
   ! --------------------------------------------------------------------------------------
   !
@@ -9,15 +41,19 @@ contains
   ! --------------------------------------------------------------------------------------
   subroutine read_param(param)
     implicit none
-    character (len=1024)::line
-
+    character (len=1024)::line,redline
+    character (len=1024)::line2
+    character (len=32)::field(32)
+    integer::nfield,debidx,endidx
+    logical::exist_file
     type(t_param)::param
-    integer::lline,eqidx
+    integer::lline,eqidx,i,di
     double precision, parameter :: pi=3.1415927
-
+    logical::eol
     param%ieof=0
     param%loopmax=1000
     param%prefix='./'
+    param%scheme='numerov'
     param%restart=.FALSE.
     param%init_wf=.TRUE.
     param%extrapol=.FALSE.
@@ -26,92 +62,138 @@ contains
     param%nvecmax=41
     param%Nx=30
     param%noccstate=1
-    param%nvec_to_cvg=20
+    param%nvec_to_cvg=1
+    allocate(param%list_idx_to_cvg(param%nvec_to_cvg))
+    allocate(param%occupation(param%nvec_to_cvg))
+    param%list_idx_to_cvg(1)=1
     param%ETA=1.0e-3
     param%dim=1
     param%box_width=pi/sqrt(2.0)
     param%Iperturb=1.0
     param%sigma=1.0
-    open(unit=1,file='inp',form='formatted')
+    param%hartree=.FALSE.
+    param%exchange=.FALSE.
+    param%Z=1.0
+    print *,'Reading ',param%inputfile
+    open(unit=1,file=param%inputfile,form='formatted')
+
     do while(.not.(is_iostat_end(param%ieof)))
-       read(1,*,iostat=param%ieof) line
-       lline=len_trim(line)
-       eqidx=index(line,"=")
-       print *,'###',eqidx,lline
-       if(line(1:eqidx-1).eq."restart") then
-          if(line(eqidx+1:lline).eq.'.TRUE.') then
-             param%restart=.TRUE.
-          else
-             param%restart=.FALSE.
+       read(1,'(A)') line
+       call line_parser(line,nfield,field)
+       print *,nfield,' --> ',(trim(field(i)),i=1,nfield)
+
+       if(field(1).eq."box_width >") then
+          read(field(2),*) param%box_width
+       end if
+       if(field(1).eq."cmd >") then
+          if(field(2).eq."end") then
+             exit
           end if
        end if
-       if(line(1:eqidx-1).eq."init_wf") then
-          if(line(eqidx+1:lline).eq.'.TRUE.') then
-             param%init_wf=.TRUE.
-          else
-             param%init_wf=.FALSE.
-          end if
+       if(field(1).eq."dimension >") then
+          read(field(2),*) param%dim
        end if
-       if(line(1:eqidx-1).eq."extrapol") then
-          if(line(eqidx+1:lline).eq.'.TRUE.') then
-             param%extrapol=.TRUE.
-          else
-             param%extrapol=.FALSE.
-          end if
+       if(field(1).eq."ETA >") then
+          read(field(2),*) param%ETA
        end if
-       if(line(1:eqidx-1).eq."extrap_add") then
-          read(line(eqidx+1:lline),*) param%extrap_add
+       if(field(1).eq."exchange >") then
+          read(field(2),*) param%exchange
        end if
-       if(line(1:eqidx-1).eq."loopmax") then
-          read(line(eqidx+1:lline),*) param%loopmax
+       if(field(1).eq."extrap_add >") then
+          read(field(2),*) param%extrap_add
        end if
-       if(line(1:eqidx-1).eq."nvecmin") then
-          read(line(eqidx+1:lline),*) param%nvecmin
+       if(field(1).eq."extrapol >") then
+          read(field(2),*) param%extrapol
        end if
-       if(line(1:eqidx-1).eq."nvecmax") then
-          read(line(eqidx+1:lline),*) param%nvecmax
+       if(field(1).eq."hartree >") then
+          read(field(2),*) param%hartree
        end if
-       if(line(1:eqidx-1).eq."Nx") then
-          read(line(eqidx+1:lline),*) param%nx
+       if(field(1).eq."init_wf >") then
+          read(field(2),*) param%init_wf
        end if
-       if(line(1:eqidx-1).eq."noccstate") then
-          read(line(eqidx+1:lline),*) param%noccstate
+       if(field(1).eq."lperturb >") then
+          read(field(2),*) param%Iperturb
        end if
-       if(line(1:eqidx-1).eq."ETA") then
-          read(line(eqidx+1:lline),*) param%ETA
+       if(field(1).eq."loopmax >") then
+          read(field(2),*) param%loopmax
        end if
-       if(line(1:eqidx-1).eq."nvec_to_cvg") then
-          read(line(eqidx+1:lline),*) param%nvec_to_cvg
+       if(field(1).eq."noccstate >") then
+          read(field(2),*) param%noccstate
        end if
-       if(line(1:eqidx-1).eq."box_width") then
-          read(line(eqidx+1:lline),*) param%box_width
+       if(field(1).eq."nvecmax >") then
+          read(field(2),*) param%nvecmax
        end if
-       if(line(1:eqidx-1).eq."dimension") then
-          read(line(eqidx+1:lline),*) param%dim
+       if(field(1).eq."nvecmin >") then
+          read(field(2),*) param%nvecmin
        end if
-       if(line(1:eqidx-1).eq."sigma") then
-          read(line(eqidx+1:lline),*) param%sigma
+       if(field(1).eq."nvec_to_cvg >") then
+          read(field(2),*) param%nvec_to_cvg
+          deallocate(param%list_idx_to_cvg)
+          allocate(param%list_idx_to_cvg(param%nvec_to_cvg))
+          do i=1,param%nvec_to_cvg
+             param%list_idx_to_cvg(i)=i
+          end do
+          deallocate(param%occupation)
+          allocate(param%occupation(param%nvec_to_cvg))
+          do i=1,param%nvec_to_cvg
+             param%occupation(i)=1.0
+          end do
        end if
-       if(line(1:eqidx-1).eq."Iperturb") then
-          read(line(eqidx+1:lline),*) param%Iperturb
+       if(field(1).eq."Nx >") then
+          read(field(2),*) param%Nx
        end if
-       if(line(1:eqidx-1).eq."prefix") then
-          read(line(eqidx+1:lline),*) param%prefix
+       if(field(1).eq."occupation >") then
+          do i=1,param%nvec_to_cvg
+             read(field(1+i),*) param%occupation(i)
+          end do
        end if
-       line=''
+       if(field(1).eq."prefix >") then
+          read(field(2),*) param%prefix
+       end if
+       if(field(1).eq."restart >") then
+          read(field(2),*) param%restart
+       end if
+       if(field(1).eq."scheme >") then
+          read(field(2),*) param%scheme
+       end if
+       if(field(1).eq."sigma >") then
+          read(field(2),*) param%sigma
+       end if
+       if(field(1).eq."Zato >") then
+          read(field(2),*) param%Z
+       end if
+
+
+       
     end do
-    close(1)
+    close(1)    
 
 
     print *,'#prefix=',param%prefix
     call system("mkdir "//param%prefix)
-
+    write(param%filenameeigen,'(a,a)') param%prefix(:len_trim(param%prefix)),'/eigenvalues.dat'
+    inquire (file=param%filenameeigen,exist=exist_file)
+    if(exist_file) then
+       call system("rm "//param%filenameeigen)
+    end if
+    open(unit=1,file=param%filenameeigen,form='formatted',status='unknown');   close(1)
 !    write(filename,'(a,a)') param%prefix(:len_trim(param%prefix)),'/evectors.dat'
  !   print *,filename
   !  open(unit=1,file=filename,form='formatted',status='unknown')
    ! close(1)
     !stop
+    param%filenameeigen =param%filenameeigen(:len_trim(param%filenameeigen ))
+    print *,'#filenameeigen=',trim(param%filenameeigen)
+
+    write(param%filenrj,'(a,a)') trim(param%prefix),'/energy.dat'
+    inquire (file=param%filenrj,exist=exist_file)
+    if(exist_file) then
+       call system("rm "//param%filenrj)
+    end if
+    open(unit=1,file=param%filenrj,form='formatted',status='unknown') ;close(1)
+    print *,'#filenrj=',trim(param%filenrj)
     print *,'#restart=',param%restart
+    print *,'#scheme=',trim(param%scheme)
     print *,'#init_wf=',param%init_wf
     print *,'#extrapol=',param%extrapol
     print *,'#extrap_add=',param%extrap_add
@@ -120,6 +202,10 @@ contains
     print *,'#nvecmax=',param%nvecmax
     print *,'#ETA=',param%ETA
     print *,'#nvec_to_cvg=',param%nvec_to_cvg
+    print *,"#occupation= ",(param%occupation(i),i=1,param%nvec_to_cvg)
+    print *,'#Zato=',param%Z
+    print *,'#hartree=',param%hartree
+    print *,'#exchange=',param%exchange
     print *,'#box_width=',param%box_width
     print *,'#Nx=',param%nx
     print *,'#noccstate=',param%noccstate
@@ -127,6 +213,45 @@ contains
     print *,'#Dimension of the mesh=',param%dim
     print *,'#Magnitude of the perturbation=',param%Iperturb
     print *,'#Spread of the perturbation=',param%sigma
+
+
     
   end subroutine read_param
+
+
+  ! --------------------------------------------------------------------------------------
+  !
+  !              line_parser()
+  !
+  ! --------------------------------------------------------------------------------------
+
+      subroutine line_parser(line,nfield,field)
+        character (len=1024)::line,redline
+        character (len=32)::field(32)
+        integer::eqidx,lline,nfield,debidx,endidx,i
+        eqidx=index(line,"=")
+        nfield=1
+        field(nfield)=line(1:eqidx-1)//' >'
+        nfield=nfield+1
+        redline=line(eqidx+1:)
+        lline=len_trim(redline)
+        if(lline.gt.0) then
+           !nfield=1
+           !print *,lline,trim(redline)
+           debidx=1
+           do i=1,len(trim(redline))
+              !print *,redline(i:i)
+              if(redline(i:i).eq.' ') then
+                 endidx=i-1
+                 field(nfield)=trim(redline(debidx:endidx))
+                 !print *,'                 >>>>',debidx,endidx,redline(debidx:endidx)
+                 debidx=endidx+1
+                 nfield=nfield+1
+              end if
+              field(nfield)=trim(redline(debidx:))
+           end do
+        end if
+      end subroutine line_parser
+    
+
 end module param_mod

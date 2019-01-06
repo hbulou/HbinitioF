@@ -45,22 +45,22 @@ contains
   end subroutine save_cube_3D
   ! --------------------------------------------------------------------------------------
   !
-  !              save_wavefunction(param,mesh,V,wf)
+  !              save_wavefunction(param,mesh,V,molecule)
   !
   ! --------------------------------------------------------------------------------------
-  subroutine save_wavefunction(param,mesh,V,wf)
+  subroutine save_wavefunction(param,mesh,V,molecule)
     implicit none
     type(t_param)::param
     type(t_mesh)::mesh
     double precision::V(:,:)
-    type(t_wavefunction)::wf
+    type(t_molecule)::molecule
     
     integer :: i,j,k
     character (len=1024) :: filecube
     
     do i=1,param%nvecmin
        call norm(mesh,V(:,i))
-       call dcopy(wf%N,V(:,i),1,wf%wfc(:,i),1)
+       call dcopy(molecule%mesh%N,V(:,i),1,molecule%wf%wfc(:,i),1)
        if(mesh%dim.eq.3) then    ! 3D
           write(filecube,'(a,a,i0,a)') param%prefix(:len_trim(param%prefix)),'/evec',i,'.cube'
           call save_cube_3D(V(:,i),filecube,mesh)
@@ -86,5 +86,49 @@ contains
        end if
     end do
   end subroutine save_wavefunction
+  ! --------------------------------------------------------------------------------------
+  !
+  !                             save_config()
+  !
+  ! subroutine to save the configuration of the calculation in order to restart it
+  ! later if necessary
+  ! --------------------------------------------------------------------------------------
+  subroutine save_config(V,m,nvecmin,param)
+    implicit none
+    type(t_mesh)::m
+    type(t_param)::param
+    double precision :: V(:,:)
+    integer::nvecmin,i,j
+    character (len=1024)::filename
+    write(filename,'(a,a)') param%prefix(:len_trim(param%prefix)),'/evectors.dat'
+    open(unit=1,file=filename,form='formatted',status='unknown')
+    do i=1,m%N
+       write(1,*) (V(i,j),j=1,nvecmin)
+    end do
+    close(1)
+  end subroutine save_config
+  ! --------------------------------------------------------------------------------------
+  !
+  !              read_config()
+  !
+  ! --------------------------------------------------------------------------------------
+  subroutine read_config(V,m,nvecmin)
+    implicit none
+    type(t_mesh)::m
+    double precision :: V(:,:)
+    integer::nvecmin,i,j
+    logical :: file_exists
+    INQUIRE(FILE="evectors.dat", EXIST=file_exists)
+    if(file_exists) then
+       open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+       do i=1,m%N
+          read(1,*) (V(i,j),j=1,nvecmin)
+       end do
+       close(1)
+    else
+       print *,"### ERROR ### evectors.dat doesn't exist"
+       stop
+    end if
+  end subroutine read_config
 
 end module IO

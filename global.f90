@@ -1,6 +1,29 @@
 module global
   implicit none
   !------------------------------------------
+  type t_nrj
+     double precision::last
+     double precision::previous
+     double precision::dnrj
+  end type t_nrj
+  type tt_cvg
+     double precision::nrj
+     double precision::nrjold
+     double precision::dnrj
+     double precision:: resi
+     logical::cvg
+  end type tt_cvg
+  type t_cvg
+     integer::nwfc
+     type(t_nrj)::total_nrj
+     type(tt_cvg),allocatable::wfc(:)
+     integer,allocatable::list_idx(:)
+     double precision :: ETA
+     integer :: nvec_to_cvg
+     integer :: ncvg
+     logical::cvg
+  end type t_cvg
+    !------------------------------------------
   type t_point
      double precision::q(3) ! coordinate
      double precision::d     ! distance from the center of the cell
@@ -17,34 +40,21 @@ module global
      integer::nbound
      type(t_point),allocatable::bound(:)
   end type t_mesh
-     !------------------------------------------
-  type t_param
-     logical::restart
-     character(len=32)::prefix
-     logical::init_wf
-     logical::extrapol
-     integer::extrap_add
-     integer::ieof
-     integer::loopmax
-     integer::nvecmin
-     integer::nvecmax
-     integer::Nx
-     integer::nvec_to_cvg
-     integer::noccstate
-     double precision :: ETA
-     double precision::box_width
-     integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
-     double precision::Iperturb
-     double precision::sigma
-  end type t_param
+
   !------------------------------------------
   type t_wavefunction
-     double precision,allocatable::S(:)
-     double precision,allocatable :: Sprev(:),dS(:) ! eigenvalues
-     integer :: nwfc,N
+     integer :: nwfc
      double precision,allocatable::wfc(:,:)
-     double precision,allocatable::rho(:)
+     double precision,allocatable::eps(:)
+     double precision,allocatable ::epsprev(:),deps(:) ! eigenvalues
   end type t_wavefunction
+  !------------------------------------------
+  type t_molecule
+     type(t_wavefunction)::wf       ! wavefunctions of the molecule
+!     integer :: N                             ! number of point in the mesh
+     type(t_mesh)::mesh               !
+     double precision,allocatable::rho(:)
+  end type t_molecule
 
 contains
 end module global
