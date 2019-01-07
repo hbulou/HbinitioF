@@ -2,16 +2,6 @@ module poten
   use global
   use IO
   implicit none
-  !------------------------------------------
-  type t_potential
-     double precision,allocatable :: ext(:) ! external potential
-     double precision,allocatable :: hartree(:) ! hartreel potential
-     double precision,allocatable :: Vx(:) ! exchange potential
-     double precision,allocatable :: perturb(:) ! perturbation potential
-     double precision,allocatable :: tot(:) ! perturbation potential
-     double precision::EX,Ehartree
-  end type t_potential
-  
 contains
     ! --------------------------------------------------------------------------------------
   !

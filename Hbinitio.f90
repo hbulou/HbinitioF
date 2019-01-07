@@ -16,7 +16,6 @@ program Hbinitio
   use numerov_mod_dev
   implicit none
   !  include 'mpif.h'
-!  type(t_mesh) :: mesh,mesh2
   type(t_cvg) :: cvg
   type(t_time) :: time_spent
   type(t_param)::param,param2
@@ -25,7 +24,6 @@ program Hbinitio
      double precision,allocatable::coeff(:,:)
   end type t_perturb
   type(t_perturb)::perturb
-  type (t_potential)::pot,pot2
   type(t_molecule):: molecule,molecule2
   !------------------------------------------
   integer :: i,j,k,n,l
@@ -51,11 +49,9 @@ program Hbinitio
 
   call new_molecule(molecule,param)
     
- ! call read_pp(pp)
-
-  call init_pot(molecule%mesh,param,pot)
-!       filename='pot_ext.cube'
-!       call save_cube_3D(pot_ext,filename,m)
+  ! call read_pp(pp)
+  !       filename='pot_ext.cube'
+  !       call save_cube_3D(pot_ext,filename,m)
 
   cvg%nwfc=param%nvecmin
   allocate(cvg%wfc(cvg%nwfc))
@@ -70,17 +66,15 @@ program Hbinitio
   end do
   
   allocate(perturb%coeff(cvg%nvec_to_cvg,cvg%nvec_to_cvg))          
-  
-
-  
+    
   if(param%scheme.eq.'numerov') then
      print *,'Starting NUMEROV scheme'
-     call numerov(molecule,pot,molecule%mesh,cvg,param)
+     call numerov(molecule,cvg,param)
   end if
   
   if(param%scheme.eq.'davidson') then
      print *,'Starting DAVIDSON scheme'
-     call davidson(param,molecule%mesh,cvg,molecule,pot,time_spent)
+     call davidson(param,molecule%mesh,cvg,molecule,molecule%pot,time_spent)
      
      ! if(param%extrapol) then
      !    call read_param(param2)
@@ -132,9 +126,9 @@ program Hbinitio
   deallocate(molecule%wf%epsprev)
   deallocate(molecule%wf%deps)
   deallocate(molecule%wf%eps)
-  deallocate(pot%ext)
-  deallocate(pot%perturb)
-  deallocate(pot%tot)
+  deallocate(molecule%pot%ext)
+  deallocate(molecule%pot%perturb)
+  deallocate(molecule%pot%tot)
   deallocate(perturb%coeff)
   call free_mesh(molecule%mesh)
   call cpu_time(time_spent%end)
@@ -159,6 +153,7 @@ contains
     type(t_param)::param
 
     call new_mesh(molecule%mesh,param)
+    call init_pot(molecule%mesh,param,molecule%pot)
     molecule%wf%nwfc=param%nvecmin
     allocate(molecule%wf%eps(molecule%wf%nwfc))
     allocate(molecule%wf%epsprev(molecule%wf%nwfc))

@@ -1,8 +1,8 @@
 scheme=numerov   ! davidson
-restart=.TRUE.
-prefix='110'
+restart=.FALSE.
+prefix='numerov'
 init_wf=.TRUE.
-extrapol=.TRUE.	
+extrapol=.FALSE.	
 extrap_add=20
 loopmax=1000
 nvecmin=20
@@ -19,3 +19,4 @@ sigma=1.0
 Zato=2.0
 hartree=.TRUE.
 exchange=.FALSE.
+cmd=end

@@ -1,38 +1,6 @@
 module param_mod
   use global
   implicit none
-  !------------------------------------------
-  type t_param
-     logical::restart
-     character(len=32)::scheme    ! numerov || davidson
-     character(len=32)::prefix
-     character (len=1024)::filenameeigen
-     character (len=1024)::filenrj
-     character (len=1024)::inputfile
-     logical::init_wf
-     logical::extrapol
-     integer::extrap_add
-     integer::ieof
-     integer::loopmax
-     integer::nvecmin
-     integer::nvecmax
-     integer::Nx
-     ! eigenvectors to converge
-     integer::nvec_to_cvg
-     integer,allocatable::list_idx_to_cvg(:)
-     integer::noccstate
-     double precision,allocatable::occupation(:)
-     ! accurency
-     double precision :: ETA
-     double precision::box_width
-     integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
-     double precision::Iperturb
-     double precision::sigma
-     logical:: hartree
-     logical::exchange
-     double precision::Z
-  end type t_param
-  
 contains
   ! --------------------------------------------------------------------------------------
   !
@@ -68,7 +36,11 @@ contains
     param%list_idx_to_cvg(1)=1
     param%ETA=1.0e-3
     param%dim=1
-    param%box_width=pi/sqrt(2.0)
+    param%box%width=pi/sqrt(2.0)
+    param%box%shape='cube'
+    param%box%center(1)=0.5
+    param%box%center(2)=0.5
+    param%box%center(3)=0.5
     param%Iperturb=1.0
     param%sigma=1.0
     param%hartree=.FALSE.
@@ -83,7 +55,15 @@ contains
        print *,nfield,' --> ',(trim(field(i)),i=1,nfield)
 
        if(field(1).eq."box_width >") then
-          read(field(2),*) param%box_width
+          read(field(2),*) param%box%width
+       end if
+       if(field(1).eq."box_shape >") then
+          read(field(2),*) param%box%shape
+       end if
+       if(field(1).eq."box_center >") then
+          read(field(2),*) param%box%center(1)
+          read(field(3),*) param%box%center(2)
+          read(field(4),*) param%box%center(3)
        end if
        if(field(1).eq."cmd >") then
           if(field(2).eq."end") then
@@ -206,15 +186,15 @@ contains
     print *,'#Zato=',param%Z
     print *,'#hartree=',param%hartree
     print *,'#exchange=',param%exchange
-    print *,'#box_width=',param%box_width
+    print *,'#box_width=',param%box%width
+    print *,'#box_shape=',param%box%shape
+    print *,'#box_center=[',param%box%center(1),',',param%box%center(2),',',param%box%center(3),']'
     print *,'#Nx=',param%nx
     print *,'#noccstate=',param%noccstate
-    print *,'#dh=',param%box_width/(param%Nx+1)
+    print *,'#dh=',param%box%width/(param%Nx+1)
     print *,'#Dimension of the mesh=',param%dim
     print *,'#Magnitude of the perturbation=',param%Iperturb
     print *,'#Spread of the perturbation=',param%sigma
-
-
     
   end subroutine read_param
 

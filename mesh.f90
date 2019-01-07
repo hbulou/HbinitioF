@@ -4,18 +4,19 @@ module mesh_mod
   implicit none
 contains
   ! -----------------------------------------------
+  !
+  !       new_mesh(m,param)
+  !
+  ! -----------------------------------------------
   subroutine new_mesh(m,param)
     implicit none
     type(t_mesh)::m
     type(t_param)::param
     double precision:: Lwidth 
     m%dim=param%dim
-    Lwidth=param%box_width
+    Lwidth=param%box%width
     m%Nx=param%Nx
     m%dx=Lwidth/(m%Nx+1)
-
-
-
     ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !
     !                3D
@@ -55,10 +56,10 @@ contains
     m%center(1)=Lwidth/2
     m%center(2)=Lwidth/2
     m%center(3)=Lwidth/2
-
-    
     ! max number of neighbors. It depends on m%dim:
     allocate(m%n_neighbors(m%N))
+    allocate(m%idx_to_ijk(m%N))
+    allocate(m%ijk_to_idx(m%N))
     ! 2*m%dim=2  @1D
     ! 2*m%dim=4  @2D
     ! 2*m%dim=6  @3D
@@ -89,6 +90,10 @@ contains
     call compute_list_neighbors(m)
   end subroutine new_mesh
   ! -----------------------------------------------
+  !
+  !          free_mesh(m)
+  !
+  ! -----------------------------------------------
   subroutine free_mesh(m)
     implicit none
     type(t_mesh) :: m
@@ -97,6 +102,10 @@ contains
     deallocate(m%n_bound)
     deallocate(m%list_bound) !
   end subroutine free_mesh
+  ! -----------------------------------------------
+  !
+  !        compute_list_neighbors(m)
+  !
   ! -----------------------------------------------
   subroutine compute_list_neighbors(m)
     implicit none
@@ -210,9 +219,6 @@ contains
              call update_bound(idx,m%Nx,j,k,1,0,0,m)
           end do
        end do
-
-
-
     else    if(m%dim.eq.2) then       ! 2D
        do i=1,m%Nx
           do j=1,m%Ny
@@ -250,18 +256,12 @@ contains
        print *,' STOP in compute_list_neighbors(): dimension=',m%dim,' not yet implemented!'
        stop
     end if
-
-
-    
-
-    
   end subroutine compute_list_neighbors
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   !
   ! update_bound(idx,i,j,k,di,dj,dk,m)
   !
   ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
   subroutine update_bound(idx,i,j,k,di,dj,dk,m)
          implicit none
          integer :: idx,i,j,k,nn,di,dj,dk
