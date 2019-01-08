@@ -17,6 +17,11 @@ contains
     Lwidth=param%box%width
     m%Nx=param%Nx
     m%dx=Lwidth/(m%Nx+1)
+    m%box%width=param%box%width
+    m%box%shape=param%box%shape
+    m%box%center(1)=param%box%center(1)
+    m%box%center(2)=param%box%center(2)
+    m%box%center(3)=param%box%center(3)
     ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !
     !                3D
@@ -53,13 +58,15 @@ contains
     end if
     m%N=m%Nx*m%Ny*m%Nz
     m%dv=m%dx*m%dy*m%dz
-    m%center(1)=Lwidth/2
-    m%center(2)=Lwidth/2
-    m%center(3)=Lwidth/2
+    m%center(1)=m%box%center(1)*m%box%width
+    m%center(2)=m%box%center(2)*m%box%width
+    m%center(3)=m%box%center(3)*m%box%width
     ! max number of neighbors. It depends on m%dim:
     allocate(m%n_neighbors(m%N))
-    allocate(m%idx_to_ijk(m%N))
-    allocate(m%ijk_to_idx(m%N))
+
+    call set_idx_list(m)
+
+
     ! 2*m%dim=2  @1D
     ! 2*m%dim=4  @2D
     ! 2*m%dim=6  @3D
@@ -91,6 +98,40 @@ contains
   end subroutine new_mesh
   ! -----------------------------------------------
   !
+  ! set_idx_list(mesh)
+  !
+  ! -----------------------------------------------
+    subroutine set_idx_list(mesh)
+      type(t_mesh)::mesh
+      integer::i,j,k,n
+      double precision::d
+      allocate(mesh%idx_to_ijk(mesh%N))
+      allocate(mesh%ijk_to_idx(mesh%Nx,mesh%Ny,mesh%Nz))
+      n=1
+      do k=1,mesh%Nz
+         do i=1,mesh%Nx
+            do j=1,mesh%Ny
+               d=(((i-1)*mesh%dx-mesh%center(1))**2&
+                    +((j-1)*mesh%dy-mesh%center(2))**2&
+                    +((k-1)*mesh%dz-mesh%center(3))**2)**(0.5)
+               if(d.le.0.5*mesh%box%width) then
+!                  print *,i,j,k,d
+                  mesh%ijk_to_idx(i,j,k)%n=n
+                  mesh%idx_to_ijk(n)%i=i
+                  mesh%idx_to_ijk(n)%j=j
+                  mesh%idx_to_ijk(n)%k=k
+                  n=n+1
+               else
+                  mesh%ijk_to_idx(i,j,k)%n=-1
+               end if
+            end do
+         end do
+      end do
+      print *,mesh%center,n
+      stop
+    end subroutine set_idx_list
+  ! -----------------------------------------------
+  !
   !          free_mesh(m)
   !
   ! -----------------------------------------------
@@ -111,7 +152,6 @@ contains
     implicit none
     type(t_mesh) :: m
     integer::i,j,k,nn,idx
-    !integer,allocatable::n_neighbors(:),list_neighbors(:,:)
 
     if(m%dim.eq.3) then   ! 3D
        do k=1,m%Nz

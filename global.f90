@@ -88,11 +88,12 @@ module global
      integer,allocatable :: list_bound(:,:),n_bound(:)  ! list_bound is linked with bound(:) 
      double precision :: dx,dy,dz,dv
      double precision :: center(3)
+     type(t_box)::box
      integer :: dim
      integer::nbound
      type(t_point),allocatable::bound(:)
      type(t_idx_to_ijk),allocatable::idx_to_ijk(:)
-     type(t_ijk_to_idx),allocatable::ijk_to_idx(:)
+     type(t_ijk_to_idx),allocatable::ijk_to_idx(:,:,:)
   end type t_mesh
   !------------------------------------------
   type t_wavefunction
