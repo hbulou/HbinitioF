@@ -61,12 +61,8 @@ contains
        alpha=-ddot(n,g,1,d,1)/dAd
        
        call daxpy(n,alpha,d,1,x,1)  ! x+alpha*d -> x
-
-
-
        
        call daxpy(n,alpha,Ad,1,g,1) ! g+alpha*Ad -> g 
-
 
        fold=f
        f=ddot(n,b,1,x,1)
@@ -78,14 +74,13 @@ contains
        f=f+0.5*ddot(n,x,1,Ax,1)
 !       print *,iloop,f,abs(f-fold),ddot(n,g,1,g,1)
 
-
        beta=ddot(n,g,1,Ad,1)/dAd
        call dscal(n,beta,d,1) ! beta*d-> d
        alpha=-1.0
        call daxpy(n,alpha,g,1,d,1) ! -g+d -> d 
        iloop=iloop+1
        if(iloop.eq.iloopmax) then
-          print *,"ERROR in COnjugtae_gradient"
+          print *,"ERROR in Conjugate_gradient"
           stop
        end if
     end do
@@ -124,8 +119,8 @@ contains
     
     do i=1,n
        g(i)=-2*m%dim*x(i)/hsqr
-       do l=1,m%n_neighbors(i)
-          g(i)=g(i)+x(m%list_neighbors(i,l))/hsqr
+       do l=1,m%node(i)%n_neighbors
+          g(i)=g(i)+x(m%node(i)%list_neighbors(l))/hsqr
        end do
        g(i)=g(i)+b(i)
     end do
@@ -146,8 +141,8 @@ contains
 
        do i=1,n
           Ad(i)=-2*m%dim*d(i)/hsqr
-          do l=1,m%n_neighbors(i)
-             Ad(i)=Ad(i)+d(m%list_neighbors(i,l))/hsqr
+          do l=1,m%node(i)%n_neighbors
+             Ad(i)=Ad(i)+d(m%node(i)%list_neighbors(l))/hsqr
           end do
         end do
 

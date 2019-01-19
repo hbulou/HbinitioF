@@ -10,13 +10,15 @@ contains
   ! --------------------------------------------------------------------------------------
   subroutine save_cube_3D(data,filename,m)
     implicit none
-    double precision :: data(:)
+    double precision :: data(:),val
 !    integer :: idxmin,idxmax
     type(t_mesh) :: m
     character (len=1024) :: filename
     
     character(len=*),parameter :: FMT1='(I5,3F12.6)'
     integer :: i,j,k,nn,ifield
+
+    print *,"# save_cube_3D > saving ",trim(filename)
     
     open(unit=1,file=filename,form='formatted',status='unknown')
     write(1,*) ' Cubefile created from Hbinitio.f90 calculation'
@@ -30,8 +32,10 @@ contains
        ifield=0
        do i=1,m%Nx
           do j=1,m%Ny
-             nn=j+(i-1)*m%Ny+(k-1)*m%Ny*m%Nx               
-             write(1,'(E13.5)',advance='no') data(nn)
+             nn=m%ijk_to_idx(i,j,k)%n
+             val=0.0
+             if(m%node(nn)%active) val=data(nn)
+             write(1,'(E13.5)',advance='no') val
              ifield=ifield+1
              if (mod(ifield,6).eq.0) then
                 ifield=0
@@ -42,6 +46,7 @@ contains
        write(1,*)
     end do
     close(1)
+!    print *,"# save_cube_3D > ok"
   end subroutine save_cube_3D
   ! --------------------------------------------------------------------------------------
   !
@@ -58,9 +63,9 @@ contains
     integer :: i,j,k
     character (len=1024) :: filecube
     
-    do i=1,param%nvecmin
+    do i=1,param%nvec_to_cvg
        call norm(mesh,V(:,i))
-       call dcopy(molecule%mesh%N,V(:,i),1,molecule%wf%wfc(:,i),1)
+       call dcopy(molecule%mesh%nactive,V(:,i),1,molecule%wf%wfc(:,i),1)
        if(mesh%dim.eq.3) then    ! 3D
           write(filecube,'(a,a,i0,a)') param%prefix(:len_trim(param%prefix)),'/evec',i,'.cube'
           call save_cube_3D(V(:,i),filecube,mesh)
@@ -76,7 +81,7 @@ contains
        else if(mesh%dim.eq.1) then  ! 1D
           write(filecube,'(a,i0,a)') 'evec',i,'.dat'
           open(unit=1,file=filecube,form='formatted',status='unknown')
-          do j=1,mesh%N
+          do j=1,mesh%nactive
              write(1,*) j*mesh%dx,V(j,i)
           end do
           close(1)
@@ -85,6 +90,7 @@ contains
           stop
        end if
     end do
+
   end subroutine save_wavefunction
   ! --------------------------------------------------------------------------------------
   !
@@ -100,9 +106,11 @@ contains
     double precision :: V(:,:)
     integer::nvecmin,i,j
     character (len=1024)::filename
+
     write(filename,'(a,a)') param%prefix(:len_trim(param%prefix)),'/evectors.dat'
+    print *,"# save_config > saving ",trim(filename)
     open(unit=1,file=filename,form='formatted',status='unknown')
-    do i=1,m%N
+    do i=1,m%nactive
        write(1,*) (V(i,j),j=1,nvecmin)
     end do
     close(1)
@@ -121,7 +129,7 @@ contains
     INQUIRE(FILE="evectors.dat", EXIST=file_exists)
     if(file_exists) then
        open(unit=1,file="evectors.dat",form='formatted',status='unknown')
-       do i=1,m%N
+       do i=1,m%nactive
           read(1,*) (V(i,j),j=1,nvecmin)
        end do
        close(1)
