@@ -2,8 +2,10 @@
 
 \usepackage[a4paper]{geometry}
 \geometry{hscale=0.85,vscale=0.85,centering}
-
+\usepackage{graphicx}
+\usepackage{subfigure}
 \usepackage[utf8]{inputenc}
+\usepackage{bm}
 \usepackage{tikz}
 \usetikzlibrary{positioning,chains,shapes}
 \tikzset{
@@ -26,6 +28,196 @@
   line/.style = {draw},
 }
 \begin{document}
+
+A detailled description of the application of the finite difference method to the electronic structure has been given by Laaksonen et al in the case of an Hartree-Fock approcach\cite{laaksonen1986}.
+
+\section{Method}
+
+\subsection{Conjugate gradient method}
+
+The solution of a linear systems of equation $\bm{A}|x>=-|b>$, where $\bm{A}$ is symmetric and positive definite, is equivalent to minimizing the quadratic function
+\begin{equation}
+  f(|x>)=\frac{1}{2}<x|\bm{A}|x>+<b|x>+c,
+\end{equation}
+with respect to the vector $|x>$.
+
+
+\section{The mesh}
+
+Using Hartree atomic units, the Schr\"odinger we want to solve is 
+
+
+\begin{equation}
+  \label{eq:1}
+  -\frac{1}{2}\left(\frac{\mathrm{d}^2}{\mathrm{d}x^2}+\frac{\mathrm{d}^2}{\mathrm{d}y^2}+\frac{\mathrm{d}^2}{\mathrm{d}z^2}\right)\phi(x,y,z)+V(x,y,z)\phi(x,y,z)=\epsilon\phi(x,y,z)
+\end{equation}
+
+For solving this equation, we resort to the finite difference method, a mesh-type approach\cite{varga2011,mazumder2015}.
+It consists to discretize the space in a finite set of locations in space so that to form a mesh:
+\begin{eqnarray}
+  (x,y,z)&\rightarrow& (i,j,k), \\
+  \phi(x,y,z)&\rightarrow& \phi_{i,j,k}, \\
+\end{eqnarray}
+with $x=i\Delta x$, $y=j\Delta y$, and $z=k\Delta z$.
+
+Then, each node of the space obeys the equation
+\begin{equation}
+  \label{eq:eq1}
+  -\frac{1}{2}\phi^{\prime\prime}_{i,j,k}+V_{i,j,k}\phi_{i,j,k}=\epsilon\phi_{i,j,k}.
+\end{equation}
+
+The principle of the finite difference method is to replace the derivatives in differential equations by approximations made up of a weighted sums of function values, derived using Taylor series expansions.
+The number of function values necessary to approximate a derivative at any node  of the space depends on both the desired accuracy and the dimension.
+For example, at the lowest accurate approximation (three-point finite difference), in  3D, the second derivative of $\phi_{i,j,k}$ can be written as
+\begin{equation}
+  \phi^{\prime\prime}_{i,j,k}=\frac{\phi_{i-1,j,k}-2\phi_{i,j,k}+\phi_{i+1,j,k}}{(\Delta x)^2}
++  \frac{\phi_{i,j-1,k}-2\phi_{i,j,k}+\phi_{i,j+1,k}}{(\Delta y)^2}
++  \frac{\phi_{i,j,k-1}-2\phi_{i,j,k}+\phi_{i,j,k-1}}{(\Delta z)^2}
+\end{equation}
+
+For each node, the replacement of the derivatives by a sum of function value leads to a linear system of algebraic equations coupling the different values $\phi_{i,j,k}$:
+
+\begin{eqnarray}
+  \label{eq:2}
+-\frac{1}{2}\left(  \frac{\phi_{i-1,j,k}-2\phi_{i,j,k}+\phi_{i+1,j,k}}{(\Delta x)^2}\right.
+ +  \frac{\phi_{i,j-1,k}-2\phi_{i,j,k}+\phi_{i,j+1,k}}{(\Delta y)^2}
+ \left. +  \frac{\phi_{i,j,k-1}-2\phi_{i,j,k}+\phi_{i,j,k-1}}{(\Delta z)^2}\right)\nonumber\\
++V_{i,j,k} \phi_{i,j,k}=\epsilon\phi_{i,j,k}
+\end{eqnarray}
+
+
+In the code, all informations about the mesh are stocked the data type \verb+t_mesh+ (defined in \verb+global.f90+):
+\begin{verbatim}
+  type t_mesh
+     integer :: Nx,Ny,Nz,N,nactive,nunactive
+     integer,allocatable :: list_bound(:,:),n_bound(:)  ! list_bound is linked with bound(:) 
+     double precision :: dx,dy,dz,dv
+     type(t_box)::box
+     integer :: dim
+     integer::nbound
+     type(t_point),allocatable::bound(:)
+     type(t_ijk_to_idx),allocatable::ijk_to_idx(:,:,:)  ! from (i,j,k) -> n
+     type(t_node),allocatable::node(:)
+  end type t_mesh
+\end{verbatim}
+Different kinds of parameters are necessary to define the mesh: the dimension (1D, 2D or 3D), shape of the box(sphere, cube, ...), size of the box($L_x$, $L_y$, $L_z$), number of nodes ($N_x$, $N_y$, $N_z$), ...
+
+The mesh spacings, $\Delta x$, $\Delta y$ and  $\Delta z$, are then given by $  \Delta\alpha=L_\alpha/(N_\alpha+1)$.
+
+
+
+\begin{figure}
+  \centering
+  \subfigure[Sphere]{\includegraphics[scale=0.29]{sphere.png}}
+  \subfigure[Cylinder]{\includegraphics[scale=0.3]{cylinder.png}}
+  \subfigure[Cube]{\includegraphics[scale=0.28]{cube.png}}
+  \caption{Definition of the "active" (blue) and "unactive" (white) domains. 3D Box $30\times 30\times 30$ bohr radius; $30 \times 30 \times 30$ nodes; radius of the computational domaine: $15$ bohr radius.}
+  \label{fig:domain3D}
+\end{figure}
+
+\begin{figure}
+  \centering
+  {\includegraphics[scale=0.29]{circle.png}}
+  \caption{Definition of the "active" (blue) and "unactive" (white) domains. 2D Box $30\times 30$ bohr radius; $30 \times 30$ nodes; radius of the computational domaine: $15$ bohr radius.}
+  \label{fig:domain2D}
+\end{figure}
+The mesh is defined by calling the subroutine \verb+new_mesh(mesh,param)+ (in \verb+mesh.f90+).
+The mesh, containing $N=N_x\times N_y\times N_z$ nodes, consists in two kind of nodes: the ``active'' nodes, belonging to the computational domain, and the ``unactive'' ones, belonging to the boundaries domain (figs.\,\ref{fig:domain3D} and \ref{fig:domain2D}). The ``active'' nodes are the nodes where we will compute quantities such as wavefunctions, potentials, ... while the ``unactive'' nodes are the nodes where all these quantities are constant.
+Example of ``unactive'' nodes is the nodes located in the outer edge of the box defining the shape of the space we consider. At these locations, the value of the wavefunction is zero in the case of isolated systems.
+The type of any node of the space is determined by the subroutine \verb+set_nodes(mesh)+:
+\begin{itemize}
+\item if the node $(i,j,k$) belongs to the computational domain, an single positive index $n$ is assigned to the node; each index $n$ corresponds to an single set $(i,j,k)$ of the space.
+  \begin{eqnarray}
+  (x,y,z)    &\rightarrow (i,j,k)    \rightarrow & n, \\
+  \phi(x,y,z)&\rightarrow \phi_{i,j,k}\rightarrow & \phi_n, 
+\end{eqnarray}
+The total number of nodes inside the computational domain is $n_{active}$.
+
+  \item if the node $(i,j,k)$ belongs to the boundaries domain, its index $n$ is set to $-1$.
+\end{itemize}
+The computational and boundaries domains are defined thanks to parameters decribing the shape  and the size of the computational box (\verb+mesh%box%shape+, \verb+mesh%box%center+, \verb+mesh%box%radius+)
+
+
+From equations\,(\ref{eq:2}) and by using the application $  (x,y,z)\rightarrow (i,j,k)    \rightarrow  n$, solving the Schr\"odinger equation\,(\ref{eq:1}) is equivalent to solve an eigenvalues problem $H|\phi>=\epsilon|\phi>$; the vector $|\phi>$ is an eigenvector to be determined, corresponding to the eigenvalue $\epsilon$.
+
+For each node $(i,j,k)$, the list of neighbors ($(i\pm1,j,k)$, $(i,j\pm 1,k)$, $(i,j,k\pm 1)$ in the case given here)  involved in equations\,(\ref{eq:2}) is given by the matrix \verb+mesh%node(nactive)%list_neighbors(:)+ \\ (\verb+mesh%node(nactive)%n_neighbors+ contains the number of neighbors for each node $(i,j,k)$).
+These lists are set in the   subroutine \verb+compute_list_neighbors(mesh)+.
+
+%A main interest of the application $  (x,y,z)\rightarrow (i,j,k)    \rightarrow  n$ is that it transforms a problem 
+
+
+\section{Electrostatic potential}
+
+There two ways to compute the electrostatic potential of the charge distribution, $\rho(\bm{r})$, of the electron in the system:
+\begin{itemize}
+\item by solving the Poisson equation, $\nabla\,U(\bm{r})=-4\pi\rho(\bm{r})$ (Hartree a.\,u.),
+\item by solving the integral equation, $U(\bm{r})=\int\mathrm{d}\bm{r}^\prime\rho(\bm{r}^\prime)\frac{1}{|\bm{r}-\bm{r}^\prime|}$.
+\end{itemize}
+Solving the integral equation is the simplest way to proceed but it is also the most inefficient because it needs to integrate the equation for each point belonging to the grid.
+
+Using the Poisson equation is a more efficient way to proceed. In the framework of the finite difference method, in three dimensions (3D), the Poisson equation has the form
+\begin{equation}
+  \frac{U_{i-1,j,k}-2U_{i,j,k}+U_{i+1,j,k}}{(\Delta\,x)^2}+
+  \frac{U_{i,j-1,k}-2U_{i,j,k}+U_{i,j+1,k}}{(\Delta\,y)^2}+
+  \frac{U_{i,j,k-1}-2U_{i,j,k}+U_{i,j,k+1}}{(\Delta\,z)^2}=-4\pi\rho_{i,j,k}.
+\end{equation}
+For each active node, the replacement of the second derivative of the electrostatic potential by a sum of functions leads to a linear systems of algebrais equations coupling the different value $U_{i,j,k}$,
+\begin{equation}
+  L|U>=-4\pi|\rho>.
+\end{equation}
+$L$ is the Laplace matrix.
+% \begin{equation}
+%   L=\left(\begin{array}{ccccccccccc}
+%             \ldots & 0 & \frac{1}{(\Delta\,x)^2} &  -2\left(\frac{1}{(\Delta\,x)^2}+\frac{1}{(\Delta\,y)^2}+\frac{1}{(\Delta\,z)^2}\right) &  \frac{1}{(\Delta\,x)^2} & 0 &\ldots & \frac{1}{(\Delta\,y)^2} & \ldots & \frac{1}{(\Delta\,z)^2}& \ldots\\
+%             \ldots & 0 & 0& \frac{1}{(\Delta\,x)^2} &  -2\left(\frac{1}{(\Delta\,x)^2}+\frac{1}{(\Delta\,y)^2}+\frac{1}{(\Delta\,z)^2}\right) &  \frac{1}{(\Delta\,x)^2} &\ldots & \frac{1}{(\Delta\,y)^2} & \ldots & \frac{1}{(\Delta\,z)^2}& \ldots\\
+%           \end{array}
+%           \right)
+% \end{equation}
+
+Note that for the active nodes located at the edge of the active domain, the replacement of the second derivative by a sum of function needs to take into account the unactive nodes located at the edge of the unactive. For example, for the node $(i,j,k)$, 
+\begin{equation}
+  \frac{U_{i-1,j,k}^*-2U_{i,j,k}+U_{i+2,j,k}}{(\Delta\,x)^2}+
+  \frac{U_{i,j-1,k}-2U_{i,j,k}+U_{i,j+1,k}}{(\Delta\,y)^2}+
+  \frac{U_{i,j,k-1}-2U_{i,j,k}+U_{i,j,k+1}}{(\Delta\,z)^2}=-4\pi\rho_{i,j,k}
+\end{equation}
+the node $U_{i-1,j,k}^*$ belongs to the unactive domain and imposes a boundary condition. Note that only a part of the unactive domain is involved in the boundary conditions. This part of the unactive domain is noted $\Omega$ in the following.
+The unactive nodes involved in the boundary conditions are listed in the data type \verb+t_node+: for each active node, the integer \verb+mesh%node(:)%n_bound+ gives the number of neigbors unactive nodes contributing to the boundary conditions (their index is given in \verb+mesh%node(:)%list_bound(:)+).
+
+Then
+\begin{equation}
+  \frac{-2U_{i,j,k}+U_{i+2,j,k}}{(\Delta\,x)^2}+
+  \frac{U_{i,j-1,k}-2U_{i,j,k}+U_{i,j+1,k}}{(\Delta\,y)^2}+
+  \frac{U_{i,j,k-1}-2U_{i,j,k}+U_{i,j,k+1}}{(\Delta\,z)^2}=-4\pi\rho_{i,j,k}-  \frac{U_{i-1,j,k}^*}{(\Delta\,x)^2}
+\end{equation}
+\begin{equation}
+  -2\left(\frac{1}{(\Delta\,x)^2}+\frac{1}{(\Delta\,y)^2}+\frac{1}{(\Delta\,z)^2}\right)U_{i,j,k}+
+  \frac{U_{i+2,j,k}}{(\Delta\,x)^2}+
+  \frac{U_{i,j-1,k}}{(\Delta\,y)^2}+
+  \frac{U_{i,j+1,k}}{(\Delta\,y)^2}+
+  \frac{U_{i,j,k-1}}{(\Delta\,z)^2}+
+  \frac{U_{i,j,k+1}}{(\Delta\,z)^2}
+  =-4\pi\rho_{i,j,k}-  \frac{U_{i-1,j,k}^*}{(\Delta\,x)^2}
+\end{equation}
+
+
+\begin{equation}
+  L|U>=-4\pi|\rho>-|b>.
+\end{equation}
+
+$|b>$ is the vector containing the boundary conditions, \emph{i.\,.e}, the values of the electrostatic potential at the edge of th
+e active domain.
+
+Now the question is: how to get the values of the electrostatic potential at the unactive point edge of the unactive domain in
+
+\newpage
+
+\section{Structure of the input file}
+
+The input file is provided directly from the command line: \verb+./Hbinitio.x inp_davidson+ for example.
+
+It must be ended by the line \verb+cmd=end+ to indicate the end of the file.
+
+\newpage
 
 \section{Structure of the code}
 
@@ -910,4 +1102,11 @@ contains
   
 end program Hbinitio
 \end{verbatim}
+
+\begin{thebibliography}{1}
+\bibitem{laaksonen1986} L. Laaksonen, P. Pyykko, and D. Sundholm, Compu. Phys. Rep. \textbf{4}, 313 (1986).
+\bibitem{varga2011} ``Computational Nanoscience,'' (2011), K. Varga and J. A. Driscoll, Cambridge University Press.
+\bibitem{mazumder2015} ``Numerical Methods for Partial Differential Equations: Finite Difference and Finite Volume Methods,'' (2015), S. Mazumder, Academic Press.
+\end{thebibliography}
+
 \end{document}

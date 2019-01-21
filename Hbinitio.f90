@@ -41,12 +41,12 @@ program Hbinitio
   END DO
   
   call time_tracking_init(time_spent)
-!  call mpi_init(ierr )
-!  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
-!  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
+  !  call mpi_init(ierr )
+  !  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
+  !  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
 
   call read_param(param)
-
+  
   call new_molecule(molecule,param)
     
   ! call read_pp(pp)
@@ -130,7 +130,7 @@ program Hbinitio
   deallocate(molecule%pot%perturb)
   deallocate(molecule%pot%tot)
   deallocate(perturb%coeff)
-  call free_mesh(molecule%mesh)
+!  call free_mesh(molecule%mesh)
   call cpu_time(time_spent%end)
   if (cvg%ncvg.ge.cvg%nvec_to_cvg) print *,'Main > Job DONE !'
   print '("Main > Total Time = ",e16.6," seconds.")',time_spent%end-time_spent%start
@@ -153,13 +153,13 @@ contains
     type(t_param)::param
 
     call new_mesh(molecule%mesh,param)
-    call init_pot(molecule%mesh,param,molecule%pot)
+    call init_pot(molecule%mesh,molecule%pot)
     molecule%wf%nwfc=param%nvecmin
     allocate(molecule%wf%eps(molecule%wf%nwfc))
     allocate(molecule%wf%epsprev(molecule%wf%nwfc))
     allocate(molecule%wf%deps(molecule%wf%nwfc))
-    allocate(molecule%wf%wfc(molecule%mesh%N,molecule%wf%nwfc))
-    allocate(molecule%rho(molecule%mesh%N))
+    allocate(molecule%wf%wfc(molecule%mesh%nactive,molecule%wf%nwfc))
+    allocate(molecule%rho(molecule%mesh%nactive))
   end subroutine new_molecule
   ! --------------------------------------------------------------------------------------
   !
@@ -174,10 +174,10 @@ contains
          type(t_mesh)::mesh
          double precision::V(:,:),normloc
           do lorb=1,param%nvecmin
-             call dcopy(mesh%N,molecule%wf%wfc(:,lorb),1,V(:,lorb),1) ! g->d
-             normloc=ddot(mesh%N,V(:,lorb),1,V(:,lorb),1)
+             call dcopy(mesh%nactive,molecule%wf%wfc(:,lorb),1,V(:,lorb),1) ! g->d
+             normloc=ddot(mesh%nactive,V(:,lorb),1,V(:,lorb),1)
              normloc=1.0/sqrt(normloc)
-             call dscal(mesh%N,normloc,V(:,lorb),1)
+             call dscal(mesh%nactive,normloc,V(:,lorb),1)
           end do
 !    GS%nindep=1
 !    call GramSchmidt(V,Vdump,nvec,m,GS)
@@ -203,52 +203,6 @@ contains
        end do
     end do
   end subroutine calc_coeff
-  ! --------------------------------------------------------------------------------------
-  !
-  !              Vperturb()
-  !
-  ! --------------------------------------------------------------------------------------
-  subroutine Vperturb(m,pot,param)
-    implicit none
-    type(t_mesh) :: m
-    type(t_param)::param
-    type(t_potential)::pot
-    double precision :: pts(3),rsqr
-
-    double precision, parameter :: pi=3.1415927
-    double precision :: invsig
-    double precision :: facperturb
-    integer :: i,j,nn
-
-    facperturb=param%Iperturb/sqrt(2*pi*param%sigma**2)
-    invsig=0.5/param%sigma**2
-    if(m%dim.eq.2) then
-       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
-       do i=1,m%Nx
-          pts(1)=i*m%dx
-          do j=1,m%Ny
-             pts(2)=j*m%dy
-             rsqr=(pts(1)-m%center(1))**2+(pts(2)-m%center(2))**2
-             nn=j+(i-1)*m%Ny
-             pot%perturb(nn)=facperturb*exp(-invsig*rsqr)
-             write(1,*) pts(1),pts(2),pot%perturb(nn)
-          end do
-       end do
-       close(1)
-    else        if(m%dim.eq.1) then
-       open(unit=1,file="pot_perturb.dat",form='formatted',status='unknown')
-       do i=1,m%Nx
-          pts(1)=i*m%dx
-          rsqr=(pts(1)-m%center(1))**2
-          pot%perturb(i)=facperturb*exp(-invsig*rsqr)
-          write(1,*) pts(1),pot%perturb(i)
-       end do
-       close(1)
-    else
-       print *,' STOP in Vperturb(): dimension=',m%dim,' not yet implemented!'
-       stop
-    end if
-  end subroutine Vperturb
   
 
   

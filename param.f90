@@ -37,12 +37,18 @@ contains
     param%ETA=1.0e-3
     param%dim=1
     param%box%width=pi/sqrt(2.0)
+    param%box%radius=param%box%width
     param%box%shape='cube'
     param%box%center(1)=0.5
     param%box%center(2)=0.5
     param%box%center(3)=0.5
-    param%Iperturb=1.0
-    param%sigma=1.0
+    param%perturb%Intensity=1.0
+    param%perturb%sigma=1.0
+    param%perturb%Intensity=1.0
+    param%perturb%location(1)=0.0
+    param%perturb%location(2)=0.0
+    param%perturb%location(3)=0.0
+    param%perturb%shape='gaussian'
     param%hartree=.FALSE.
     param%exchange=.FALSE.
     param%Z=1.0
@@ -54,6 +60,9 @@ contains
        call line_parser(line,nfield,field)
        print *,nfield,' --> ',(trim(field(i)),i=1,nfield)
 
+       if(field(1).eq."box_radius >") then
+          read(field(2),*) param%box%radius
+       end if
        if(field(1).eq."box_width >") then
           read(field(2),*) param%box%width
        end if
@@ -91,9 +100,22 @@ contains
        if(field(1).eq."init_wf >") then
           read(field(2),*) param%init_wf
        end if
-       if(field(1).eq."lperturb >") then
-          read(field(2),*) param%Iperturb
+       if(field(1).eq."perturb_intensity >") then
+          read(field(2),*) param%perturb%Intensity
        end if
+       if(field(1).eq."perturb_sigma >") then
+          read(field(2),*) param%perturb%sigma
+       end if
+       if(field(1).eq."perturb_shape >") then
+          read(field(2),*) param%perturb%shape
+       end if
+       if(field(1).eq."perturb_location >") then
+          read(field(2),*) param%perturb%location(1)
+          read(field(3),*) param%perturb%location(2)
+          read(field(4),*) param%perturb%location(3)
+       end if
+
+
        if(field(1).eq."loopmax >") then
           read(field(2),*) param%loopmax
        end if
@@ -135,9 +157,6 @@ contains
        end if
        if(field(1).eq."scheme >") then
           read(field(2),*) param%scheme
-       end if
-       if(field(1).eq."sigma >") then
-          read(field(2),*) param%sigma
        end if
        if(field(1).eq."Zato >") then
           read(field(2),*) param%Z
@@ -187,14 +206,17 @@ contains
     print *,'#hartree=',param%hartree
     print *,'#exchange=',param%exchange
     print *,'#box_width=',param%box%width
+    print *,'#box_radius=',param%box%radius
     print *,'#box_shape=',param%box%shape
     print *,'#box_center=[',param%box%center(1),',',param%box%center(2),',',param%box%center(3),']'
     print *,'#Nx=',param%nx
     print *,'#noccstate=',param%noccstate
     print *,'#dh=',param%box%width/(param%Nx+1)
     print *,'#Dimension of the mesh=',param%dim
-    print *,'#Magnitude of the perturbation=',param%Iperturb
-    print *,'#Spread of the perturbation=',param%sigma
+    print *,'#Perturbation shape=',param%perturb%shape
+    print *,'#Magnitude of the perturbation=',param%perturb%Intensity
+    print *,'#Spread of the perturbation=',param%perturb%sigma
+    print *,'#Perturbation location=[',param%perturb%location(1),',',param%perturb%location(2),',',param%perturb%location(3),']'
     
   end subroutine read_param
 

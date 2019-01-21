@@ -1,6 +1,6 @@
 module global
   implicit none
-  !------------------------------------------
+  ! ------------------------------------------
   type t_potential
      double precision,allocatable :: ext(:) ! external potential
      double precision,allocatable :: hartree(:) ! hartreel potential
@@ -9,12 +9,29 @@ module global
      double precision,allocatable :: tot(:) ! perturbation potential
      double precision::EX,Ehartree
   end type t_potential
-    !------------------------------------------
+  ! ------------------------------------------
   type t_box
-          character(len=32)::shape
-          double precision::width
-          double precision::center(3)
+     character(len=32)::shape
+     double precision::width
+     double precision::center(3)
+     double precision::radius
   end type t_box
+  ! --------------------------------------------------------
+  !
+  !     PERTURBATION data type
+  !
+  ! -------------------------------------------------------
+  type t_perturbation
+     character(len=32)::shape
+     double precision::Intensity
+     double precision::sigma
+     double precision::location(3)
+  end type t_perturbation
+  ! --------------------------------------------------------
+  !
+  !     PARAM data type
+  !
+  ! -------------------------------------------------------
   type t_param
      logical::restart
      character(len=32)::scheme    ! numerov || davidson
@@ -38,9 +55,8 @@ module global
      ! accurency
      double precision :: ETA
      type(t_box)::box
+     type(t_perturbation)::perturb
      integer:: dim !dimension of the mesh 1(1D), 2(2D) or 3(3D)
-     double precision::Iperturb
-     double precision::sigma
      logical:: hartree
      logical::exchange
      double precision::Z
@@ -75,25 +91,39 @@ module global
      double precision::val   ! value of the Hartree potential
   end type t_point
   !------------------------------------------
-  type t_idx_to_ijk
-     integer::i,j,k
-  end type t_idx_to_ijk
   type t_ijk_to_idx
      integer::n
+     double precision::q(3)
+     logical::active
   end type t_ijk_to_idx
   !------------------------------------------
+  type t_node
+     integer::n_neighbors
+     integer,allocatable::list_neighbors(:)
+     integer::n_bound
+     integer,allocatable::list_bound(:)
+     logical::usefull_unactive
+     logical::active
+     integer::i,j,k
+     double precision::q(3)
+  end type t_node
+  ! -----------------------------------------------------------
+  !
+  !   MESH data type
+  !
+  ! ----------------------------------------------------------
   type t_mesh
-     integer :: Nx,Ny,Nz,N
-     integer,allocatable :: list_neighbors(:,:),n_neighbors(:)
+     integer :: Nx,Ny,Nz,Ntot,nactive,nunactive
      integer,allocatable :: list_bound(:,:),n_bound(:)  ! list_bound is linked with bound(:) 
      double precision :: dx,dy,dz,dv
-     double precision :: center(3)
      type(t_box)::box
+     type(t_perturbation)::perturb
      integer :: dim
      integer::nbound
+     integer::n_usefull_unactive
      type(t_point),allocatable::bound(:)
-     type(t_idx_to_ijk),allocatable::idx_to_ijk(:)
-     type(t_ijk_to_idx),allocatable::ijk_to_idx(:,:,:)
+     type(t_ijk_to_idx),allocatable::ijk_to_idx(:,:,:)  ! from (i,j,k) -> n
+     type(t_node),allocatable::node(:)
   end type t_mesh
   !------------------------------------------
   type t_wavefunction

@@ -43,19 +43,19 @@ contains
        Vout(:,GS%nindep+1)=Vin(:,i)
        do k=1,GS%nindep
           ! We compute the projection of Vini(:,i) on V(:,1-nindep)
-          a(k)=ddot(m%N,Vout(:,k),1,Vin(:,i),1)
+          a(k)=ddot(m%nactive,Vout(:,k),1,Vin(:,i),1)
           !print *,'GS > ',i,k,a(k)
           ! then we remove V(:,k) from V(:,nindep+1)
-          call daxpy(m%N,-a(k),Vout(:,k),1,Vout(:,GS%nindep+1),1)
+          call daxpy(m%nactive,-a(k),Vout(:,k),1,Vout(:,GS%nindep+1),1)
        end do
        ! now wre compute the norm of V(:,nindep+1)
-       normloc=sqrt(ddot(m%N,Vout(:,GS%nindep+1),1,Vout(:,GS%nindep+1),1))
+       normloc=sqrt(ddot(m%nactive,Vout(:,GS%nindep+1),1,Vout(:,GS%nindep+1),1))
        !print *,'GS > norm(',i,')=',norm
        if (normloc.le.ETA) then
           GS%ndep=GS%ndep+1 ! V(:,nindep+1) is not linearly inependent
        else
           normloc=1.0/normloc
-          call dscal(m%N,normloc,Vout(:,GS%nindep+1),1)
+          call dscal(m%nactive,normloc,Vout(:,GS%nindep+1),1)
           !              do k=2,icur
           !                 print *,'<U',k-1,'|U',i,'>=',ddot(N,V(:,k-1),1,V(:,icur),1)
           !              end do
@@ -65,7 +65,7 @@ contains
     print *,'GS> ',GS%ndep,' vectors linearly dependant'
     print *,'GS> ',GS%nindep,' vectors linearly independant'
     print *,'GS> Size of the basis from ',nvec,' to ',GS%nindep
-    !call check_ortho(Vout,nvec,m%N)
+    !call check_ortho(Vout,nvec,m%nactive)
     !stop
     nvec=GS%nindep
     deallocate(a)
@@ -82,7 +82,7 @@ contains
     double precision :: f(:)
     integer::i
     simpson=0.0
-    do i=1,m%N-2,2
+    do i=1,m%nactive-2,2
        simpson=simpson+f(i)*f(i)+4*f(i+1)*f(i+1)+f(i+2)*f(i+2)
     end do
     simpson=m%dv*simpson/3.0
@@ -99,7 +99,7 @@ contains
     double precision :: f(:)
     integer::i
      trapz=0.0
-    do i=1,m%N-1
+    do i=1,m%nactive-1
         trapz=trapz+f(i)*f(i)+f(i+1)*f(i+1)
     end do
     trapz=0.5*m%dv*trapz
@@ -115,9 +115,9 @@ contains
     double precision, external :: ddot
     type(t_mesh)::m
     if(m%dim.eq.3) then
-       normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
+       normloc=1.0/sqrt(m%dv*ddot(m%nactive,evec(:),1,evec(:),1))
     else if(m%dim.eq.2) then
-       normloc=1.0/sqrt(m%dv*ddot(m%N,evec(:),1,evec(:),1))
+       normloc=1.0/sqrt(m%dv*ddot(m%nactive,evec(:),1,evec(:),1))
     else    if(m%dim.eq.1) then
        !       normloc=1.0/sqrt(trapz(m,evec))
        !       print *,normloc,sqrt(trapz(m,evec))
@@ -126,7 +126,7 @@ contains
        print *,' STOP in norm(): dimension=',m%dim,' not yet implemented!'
        stop
     end if
-    call dscal(m%N,normloc,evec(:),1)
+    call dscal(m%nactive,normloc,evec(:),1)
   end subroutine norm
   ! --------------------------------------------------------------------------------------
   !
@@ -207,7 +207,7 @@ contains
          double precision,allocatable::b(:)
 
          do j=1,param%noccstate
-            call dcopy(molecule%mesh%N,V(:,j),1,molecule%wf%wfc(:,j),1)
+            call dcopy(molecule%mesh%nactive,V(:,j),1,molecule%wf%wfc(:,j),1)
             call norm(mesh,molecule%wf%wfc(:,j))
          end do
 
@@ -215,30 +215,33 @@ contains
 
          molecule%rho=0.0
          do j=1,param%noccstate
-            do i=1,mesh%N
+            do i=1,mesh%nactive
                molecule%rho(i)=molecule%rho(i)-molecule%wf%wfc(i,j)**2
             end do
          end do
          charge=mesh%dv*sum(molecule%rho)
-         print *,"Compute density >  Charge ",charge
+         print *,"Compute density > Charge ",charge
          print *,"Compute density > mesh%dv=",mesh%dv
+         print *,"Compute density > mesh%dx=",mesh%dx
          print *,"Compute density > mesh%Nx=",mesh%Nx
+         print *,"Compute density > mesh%Nactive=",mesh%nactive
+         print *,"Compute density > mesh%Nunactive=",mesh%nunactive
          do i=1,mesh%nbound
             mesh%bound(i)%val=charge/mesh%bound(i)%d
             !print *,mesh%bound(i)%q,mesh%bound(i)%val
          end do
          
 
-    allocate(b(mesh%N))
-    do i=1,mesh%N
+    allocate(b(mesh%nactive))
+    do i=1,mesh%nactive
        b(i)=molecule%rho(i)
        do j=1,mesh%n_bound(i)
           b(i)=b(i)+mesh%bound(mesh%list_bound(i,j))%val/mesh%dx**2
        end do
 !       print *,b(i)
     end do
-!    b(mesh%N-1)=b(mesh%N-1)-U(mesh%N)/mesh%dx**2
-!    call Conjugate_gradient_3D(-b,pot%hartree,mesh%N,mesh%dx,mesh)    
+!    b(mesh%nactive-1)=b(mesh%nactive-1)-U(mesh%nactive)/mesh%dx**2
+!    call Conjugate_gradient_3D(-b,pot%hartree,mesh%nactive,mesh%dx,mesh)    
   end subroutine compute_density
   ! --------------------------------------------------------------------------------------
   !
@@ -281,14 +284,14 @@ contains
     i=8;     A(i,1)=1.0 ; A(i,2)=x1 ; A(i,3) = y1 ; A(i,4)=z1 ; A(i,5) = x1*y1 ; A(i,6)=x1*z1 ; A(i,7) = y1*z1 ; A(i,8) = x1*y1*z1
 
     C=0.0
-    i=i0 ; j=j0 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(1)=molecule%wf%wfc(n,l)
-    i=i1 ; j=j0 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(2)=molecule%wf%wfc(n,l)
-    i=i0 ; j=j1 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(3)=molecule%wf%wfc(n,l)
-    i=i1 ; j=j1 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(4)=molecule%wf%wfc(n,l)
-    i=i0 ; j=j0 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(5)=molecule%wf%wfc(n,l)
-    i=i1 ; j=j0 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(6)=molecule%wf%wfc(n,l)
-    i=i0 ; j=j1 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(7)=molecule%wf%wfc(n,l)
-    i=i1 ; j=j1 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%N) C(8)=molecule%wf%wfc(n,l)
+    i=i0 ; j=j0 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(1)=molecule%wf%wfc(n,l)
+    i=i1 ; j=j0 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(2)=molecule%wf%wfc(n,l)
+    i=i0 ; j=j1 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(3)=molecule%wf%wfc(n,l)
+    i=i1 ; j=j1 ; k=k0 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(4)=molecule%wf%wfc(n,l)
+    i=i0 ; j=j0 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(5)=molecule%wf%wfc(n,l)
+    i=i1 ; j=j0 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(6)=molecule%wf%wfc(n,l)
+    i=i0 ; j=j1 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(7)=molecule%wf%wfc(n,l)
+    i=i1 ; j=j1 ; k=k1 ;     n=j+(i-1)*mesh%Ny+(k-1)*mesh%Ny*mesh%Nx;    if(n.le.mesh%nactive) C(8)=molecule%wf%wfc(n,l)
 
     ! do i=1,8
     !    print *,(A(i,j),j=1,8)

@@ -29,8 +29,8 @@ contains
     ! building the radial mesh
     !
     ! ---------------------------------------------------
-    allocate(r(molecule%mesh%N))
-    do i=1,molecule%mesh%N
+    allocate(r(molecule%mesh%nactive))
+    do i=1,molecule%mesh%nactive
        r(i)=i*molecule%mesh%dx
     end do
 
@@ -53,22 +53,22 @@ contains
        ! ================================
        !  updating the potential
        ! ================================
-       do i=1,molecule%mesh%N
+       do i=1,molecule%mesh%nactive
           molecule%pot%tot(i)=-param%Z/r(i)+0.5*l*(l+1)/r(i)**2
        end do
        if(param%hartree) then
-          do i=1,molecule%mesh%N
+          do i=1,molecule%mesh%nactive
              molecule%pot%tot(i)=molecule%pot%tot(i)+molecule%pot%hartree(i)
           end do
        end if
           if(param%exchange) then
-             do i=1,molecule%mesh%N
+             do i=1,molecule%mesh%nactive
                 molecule%pot%tot(i)=molecule%pot%tot(i)+molecule%pot%Vx(i)
              end do
           end if
        
           open(unit=1,file='pot.dat',form='formatted',status='unknown')
-          do i=2,molecule%mesh%N
+          do i=2,molecule%mesh%nactive
              write(1,*) r(i),molecule%pot%tot(i),-param%Z/r(i),0.5*l*(l+1)/r(i)**2,&
                   molecule%pot%hartree(i),molecule%pot%Vx(i)
           end do
@@ -95,7 +95,7 @@ contains
           ! =========================================
           molecule%rho=0.0
           do j=1,param%noccstate
-             do i=1,molecule%mesh%N
+             do i=1,molecule%mesh%nactive
                 molecule%rho(i)=-(molecule%wf%wfc(i,j)/r(i))**2
              end do
           end do
@@ -103,11 +103,11 @@ contains
           ! computing the exchange potential and the exchange nrj
           !==========================================
           if(param%exchange) then
-             do i=1,molecule%mesh%N
+             do i=1,molecule%mesh%nactive
                 molecule%pot%Vx(i)=-(3.0*molecule%wf%wfc(i,1)**2/(2*(pi*r(i))**2))**(1.0/3.0)
              end do
              molecule%pot%EX=  0.0
-             do i=1,molecule%mesh%N-1
+             do i=1,molecule%mesh%nactive-1
                 molecule%pot%EX=molecule%pot%EX+&
                      0.5*molecule%mesh%dx*(&
                      molecule%pot%Vx(i)*molecule%wf%wfc(i,1)**2+&
@@ -117,7 +117,7 @@ contains
           
           !         call serie(molecule,mesh,r)
           !        open(unit=1,file=trim(param%prefix)//'/rho.dat',form='formatted',status='unknown')
-          !       do i=1,mesh%N
+          !       do i=1,mesh%nactive
           !         write(1,*) r(i),molecule%rho(i)/r(i)
           !     end do
           !    close(1)
@@ -126,16 +126,16 @@ contains
           ! computing the Hartree potential -> calling hartree_cg()
           !==========================================
           if(param%hartree) then
-             do i=1,molecule%mesh%N
+             do i=1,molecule%mesh%nactive
                 molecule%pot%hartree(i)=molecule%pot%hartree(i)*r(i)
              end do
              call Hartree_cg(molecule,molecule%mesh,r,molecule%pot)
-             do i=1,molecule%mesh%N
+             do i=1,molecule%mesh%nactive
                 molecule%pot%hartree(i)=molecule%pot%hartree(i)/r(i)
              end do
              ! Hartree energy
              molecule%pot%EHartree=  0.0
-             do i=1,molecule%mesh%N-1
+             do i=1,molecule%mesh%nactive-1
                 molecule%pot%EHartree=molecule%pot%EHartree+&
                      0.5*molecule%mesh%dx*(&
                      molecule%pot%hartree(i)*molecule%wf%wfc(i,1)**2+&
@@ -180,7 +180,7 @@ contains
 
           write(filename,'(a,a,i0,a)') trim(param%prefix),'/wfc',iloop,'.dat'
           open(unit=1,file=filename,form='formatted',status='unknown')
-          do i=1,molecule%mesh%N
+          do i=1,molecule%mesh%nactive
              write(1,*) r(i),(molecule%wf%wfc(i,j),j=1,nwfc)
           end do
           close(1)
@@ -188,7 +188,7 @@ contains
           !       write(filename,'(a,a,i0,a)') trim(param%prefix),'/potential',iloop,'.dat'
           write(filename,'(a,a)') trim(param%prefix),'/potential.dat'
           open(unit=1,file=filename,form='formatted',status='unknown')
-          do i=1,molecule%mesh%N
+          do i=1,molecule%mesh%nactive
              write(1,*) r(i),molecule%pot%tot(i),molecule%pot%hartree(i),&
                   molecule%pot%VX(i),molecule%rho(i)
           end do
@@ -220,9 +220,9 @@ contains
     logical,parameter :: outward=.TRUE.,inward=.FALSE.
     ! first we search an eigenenergy close to the soution
     ! by considering the number of nodes of the wavefunction
-    allocate(Q(molecule%mesh%N))
-    allocate(Vin(molecule%mesh%N))
-    allocate(Vout(molecule%mesh%N))
+    allocate(Q(molecule%mesh%nactive))
+    allocate(Vin(molecule%mesh%nactive))
+    allocate(Vout(molecule%mesh%nactive))
     facsign=(0.5*mod(n_nodes_wanted,2)-1)
     sqrd=mesh%dx**2
     
@@ -231,7 +231,7 @@ contains
     print * ,'Numerov_step> Potential @ infinite=',emax,maxval(pot%tot)    
     print *,"Numerov_step> Searching a wfc with ",n_nodes_wanted," nodes" 
 
-    eps=pot%tot(molecule%mesh%N/2)
+    eps=pot%tot(molecule%mesh%nactive/2)
     n_nodes=-1
     
     ! two steps
@@ -240,10 +240,10 @@ contains
     !           Then eps corresponds to the a lower bound for the energy
     iloop=1
     do while       ((iloop.le.param%loopmax).and.(.not.(n_nodes.eq.n_nodes_wanted)))
-       call compute_Q(Q,molecule%mesh%N,eps,r,pot)
+       call compute_Q(Q,molecule%mesh%nactive,eps,r,pot)
        Vout(1)=0.001
-       call numerov_integrate(outward,Q,Vout,molecule%mesh%N,sqrd)
-       n_nodes=count_nodes(Vout,molecule%mesh%N)
+       call numerov_integrate(outward,Q,Vout,molecule%mesh%nactive,sqrd)
+       n_nodes=count_nodes(Vout,molecule%mesh%nactive)
        write(*,'(A,I0,A,F8.4,A,I0)',advance='no') 'phase 1 > eps(',iloop,')=',eps,' n_node(s)=',n_nodes
        if(n_nodes.gt.n_nodes_wanted) then
           emax=eps
@@ -274,12 +274,12 @@ contains
        eps=0.5*(emin+emax)
        print *,'phase 2 > eps =',eps
        if(eps.ge.0.0) stop
-       call compute_Q(Q,molecule%mesh%N,eps,r,pot)
+       call compute_Q(Q,molecule%mesh%nactive,eps,r,pot)
        Vout(1)=0.001
-       call numerov_integrate(outward,Q,Vout,molecule%mesh%N,sqrd)
+       call numerov_integrate(outward,Q,Vout,molecule%mesh%nactive,sqrd)
 
        open(unit=1,file="Vout.dat",form='formatted',status='unknown')
-       do i=1,mesh%N
+       do i=1,mesh%nactive
           write(1,*) r(i),Vout(i)
        end do
        close(1)
@@ -287,7 +287,7 @@ contains
 
 
 
-       n_nodes=count_nodes(Vout,molecule%mesh%N)
+       n_nodes=count_nodes(Vout,molecule%mesh%nactive)
 !       write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(2) eps(',iloop,')=',eps,&
 !            ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
        if(n_nodes.gt.(n_nodes_wanted+1)) then
@@ -333,20 +333,20 @@ contains
     do while((iloop.le.param%loopmax).and.(abs(eta).gt.cvg%ETA))
        eps=0.5*(emin+emax)
        !print *,"new eps=",eps
-       call compute_Q(Q,molecule%mesh%N,eps,r,pot)
-       impt=matching_point(Q,molecule%mesh%N)
+       call compute_Q(Q,molecule%mesh%nactive,eps,r,pot)
+       impt=matching_point(Q,molecule%mesh%nactive)
        Vout(1)=0.001
-       call numerov_integrate(outward,Q,Vout,molecule%mesh%N,sqrd)
-       Vin(molecule%mesh%N)=0.001
-       call numerov_integrate(inward,Q,Vin,molecule%mesh%N,sqrd)
-       n_nodes=count_nodes(Vout,molecule%mesh%N)
+       call numerov_integrate(outward,Q,Vout,molecule%mesh%nactive,sqrd)
+       Vin(molecule%mesh%nactive)=0.001
+       call numerov_integrate(inward,Q,Vin,molecule%mesh%nactive,sqrd)
+       n_nodes=count_nodes(Vout,molecule%mesh%nactive)
 
         Iout=0.0
         do i=1,impt-1
            Iout=Iout+0.5*mesh%dx*(Vout(i)**2+Vout(i+1)**2)
         end do
         Iin=0.0
-        do i=impt,molecule%mesh%N-1
+        do i=impt,molecule%mesh%nactive-1
            Iin=Iin+0.5*mesh%dx*(Vin(i)**2+Vin(i+1)**2)
         end do
         dVin=0.5*(Vin(impt+1)-Vin(impt-1))/mesh%dx
@@ -386,7 +386,7 @@ contains
     do i=1,impt
        molecule%wf%wfc(i,idxwfc)=Vout(i)/Vout(impt)
     end do
-    do i=impt+1,mesh%N
+    do i=impt+1,mesh%nactive
        molecule%wf%wfc(i,idxwfc)=Vin(i)/Vin(impt)
     end do
     call norm(mesh,molecule%wf%wfc(:,idxwfc))
@@ -540,7 +540,7 @@ contains
 
 !    open(unit=1,file='R.dat',form='formatted',status='unknown')
 !    write(1,*) 0.0,a(1)
-!    do i=2,mesh%N
+!    do i=2,mesh%nactive
 !       write(1,*) r(i),molecule%wf%wfc(i,1)/r(i)
 !    end do
 !    close(1)
@@ -571,8 +571,8 @@ contains
 
     
     
-    charge_inf=0.5*mesh%dx*(molecule%wf%wfc(1,1)**2+molecule%wf%wfc(mesh%N,1)**2)
-    do i=1,mesh%N-1
+    charge_inf=0.5*mesh%dx*(molecule%wf%wfc(1,1)**2+molecule%wf%wfc(mesh%nactive,1)**2)
+    do i=1,mesh%nactive-1
        charge_inf=charge_inf+0.5*mesh%dx*(molecule%wf%wfc(i,1)**2+molecule%wf%wfc(i+1,1)**2)
     end do
 !    charge_inf =2*charge_inf 
@@ -580,27 +580,27 @@ contains
 
 
 
-    allocate(b(mesh%N))
-    do i=1,mesh%N
+    allocate(b(mesh%nactive))
+    do i=1,mesh%nactive
 !       b(i)=-molecule%rho(i)
        b(i)=-molecule%wf%wfc(i,1)**2/r(i)
     end do
 
 
-    do i=1,mesh%N
+    do i=1,mesh%nactive
        pot%hartree(i)=pot%hartree(i)*r(i)
     end do
-    b(mesh%N)=b(mesh%N)-charge_inf/mesh%dx**2
+    b(mesh%nactive)=b(mesh%nactive)-charge_inf/mesh%dx**2
     
-    call Conjugate_gradient_3D(-b,pot%hartree,mesh%N,mesh%dx,mesh)    
+    call Conjugate_gradient_3D(-b,pot%hartree,mesh%nactive,mesh%dx,mesh)    
 
     open(unit=1,file='hartree.dat',form='formatted',status='unknown')
     write(1,*) r(1)-mesh%dx,0.0
-    do i=1,mesh%N
+    do i=1,mesh%nactive
 !       pot%hartree(i)=pot%hartree(i)/r(i)
        write(1,*) r(i),pot%hartree(i)
     end do
-    write(1,*) r(mesh%N)+mesh%dx,charge_inf  !/(r(mesh%N)+mesh%dx)
+    write(1,*) r(mesh%nactive)+mesh%dx,charge_inf  !/(r(mesh%nactive)+mesh%dx)
     close(1)
     
     deallocate(b)
@@ -672,7 +672,7 @@ contains
   !      alpha=ddot(n,grad,1,grad,1)/ddot(n,grad,1,y,1)
   !      print *,'alpha=',alpha ,ddot(n,grad,1,y,1),ddot(n,grad,1,grad,1)
        
-  !      !    call dscal(mesh%N-2,-alpha,grad,1)
+  !      !    call dscal(mesh%nactive-2,-alpha,grad,1)
   !      call daxpy(n,-alpha,grad,1,U,1)
 
        
@@ -699,69 +699,69 @@ contains
     integer,parameter :: seed = 86456
     character (len=1024) :: filesave
 
-    allocate(source(molecule%mesh%N))
-    allocate(U(molecule%mesh%N))
-    allocate(b(molecule%mesh%N))
-    allocate(grad(molecule%mesh%N))
-    allocate(y(molecule%mesh%N))
+    allocate(source(molecule%mesh%nactive))
+    allocate(U(molecule%mesh%nactive))
+    allocate(b(molecule%mesh%nactive))
+    allocate(grad(molecule%mesh%nactive))
+    allocate(y(molecule%mesh%nactive))
     call srand(seed)
 
     q=0.0
-    do i=1,mesh%N-1
+    do i=1,mesh%nactive-1
        q=q+0.5*mesh%dx*(molecule%wf%wfc(i,1)**2+molecule%wf%wfc(i+1,1)**2)
     end do
     print *,"q=",q 
 
-    do i=2,mesh%N-1
+    do i=2,mesh%nactive-1
        U(i)=rand()
     end do
     U(1)=0.0
-    U(mesh%N)=q
+    U(mesh%nactive)=q
 
 
-    do i=1,mesh%N
+    do i=1,mesh%nactive
        source(i)=-molecule%wf%wfc(i+1,1)**2/r(i+1)
     end do
 
 
-    do i=1,mesh%N
+    do i=1,mesh%nactive
        b(i)=source(i)
     end do
     b(2)=b(2)-U(1)/mesh%dx**2
-    b(mesh%N-1)=b(mesh%N-1)-U(mesh%N)/mesh%dx**2
+    b(mesh%nactive-1)=b(mesh%nactive-1)-U(mesh%nactive)/mesh%dx**2
 
 
 
     
     grad(1)=0.0
-    grad(mesh%N)=0.0
+    grad(mesh%nactive)=0.0
     y(1)=0.0
-    y(mesh%N)=0.0
+    y(mesh%nactive)=0.0
 
     
     do j=1,100000000
        grad(2)=(U(3)-2*U(2))/mesh%dx**2-b(2)
-       do i=3,mesh%N-2
+       do i=3,mesh%nactive-2
           grad(i)=(U(i+1)-2*U(i)+U(i-1))/mesh%dx**2-b(i)
        end do
-       grad(mesh%N-1)=(-2*U(mesh%N-1)+U(mesh%N-2))/mesh%dx**2-b(mesh%N-1)
+       grad(mesh%nactive-1)=(-2*U(mesh%nactive-1)+U(mesh%nactive-2))/mesh%dx**2-b(mesh%nactive-1)
        
        y(2)=(grad(3)-2*grad(2))/mesh%dx**2
-       do i=3,mesh%N-2
+       do i=3,mesh%nactive-2
           y(i)=(grad(i+1)-2*grad(i)+grad(i-1))/mesh%dx**2
        end do
-       y(mesh%N-1)=(-2*grad(mesh%N-1)+grad(mesh%N-2))/mesh%dx**2
+       y(mesh%nactive-1)=(-2*grad(mesh%nactive-1)+grad(mesh%nactive-2))/mesh%dx**2
        
-       alpha=ddot(mesh%N,grad,1,grad,1)/ddot(mesh%N,grad,1,y,1)
-       print *,'alpha=',alpha,ddot(mesh%N,grad,1,y,1),ddot(mesh%N,grad,1,grad,1)
+       alpha=ddot(mesh%nactive,grad,1,grad,1)/ddot(mesh%nactive,grad,1,y,1)
+       print *,'alpha=',alpha,ddot(mesh%nactive,grad,1,y,1),ddot(mesh%nactive,grad,1,grad,1)
        
-       !    call dscal(mesh%N-2,-alpha,grad,1)
-       call daxpy(mesh%N,-alpha,grad,1,U,1)
+       !    call dscal(mesh%nactive-2,-alpha,grad,1)
+       call daxpy(mesh%nactive,-alpha,grad,1,U,1)
 
        if(mod(j,10000).eq.0) then
           write(filesave,'(a,i0,a)') 'b',j,'.dat'
           open(unit=1,file=filesave,form='formatted',status='unknown')
-          do i=1,mesh%N
+          do i=1,mesh%nactive
              write(1,*) r(i),source(i-1),U(i)
           end do
        end if
@@ -770,11 +770,11 @@ contains
 
 
 !    open(unit=1,file='b.dat',form='formatted',status='unknown')
-!    do i=1,mesh%N
+!    do i=1,mesh%nactive
 !       write(1,*) r(i),source(i-1),U(i)
 !    end do
 
-!    write(1,*) r(mesh%N),source(i-1),x(i)
+!    write(1,*) r(mesh%nactive),source(i-1),x(i)
 !    close(1)
 
     
