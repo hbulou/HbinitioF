@@ -40,7 +40,7 @@ contains
       lambda=1.6/a0
       k0=0*2*pi/(.05*molecule%mesh%box%width)
       sigsqr=sig*sig
-      x0=molecule%mesh%box%width/2
+      x0=molecule%mesh%box%width/4
       do i=1,molecule%mesh%nactive
          x=i*molecule%mesh%dx-x0
          wfc(i,oldt)=cmplx(exp(-x*x/sigsqr)*cos(2*pi*x/lambda),exp(-x*x/sigsqr)*sin(2*pi*x/lambda))
@@ -56,8 +56,12 @@ contains
       epsilonx1=0.5
       x1=60.0
       do i=1,molecule%mesh%nactive
-         x=i*molecule%mesh%dx-x0
-         molecule%pot%tot(i)=2*epsilonx1*(x/(x1-x0))**2
+         x=i*molecule%mesh%dx-2*x0
+         if(abs(x).lt.10) then
+            molecule%pot%tot(i)=1.0
+         else
+            molecule%pot%tot(i)=0
+         end if
       end do
       open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
       do i=1,molecule%mesh%nactive
@@ -184,6 +188,8 @@ contains
           write(1,*) 's2 LINEWIDTH 2.0'
           write(1,*) 'BLOCK xy "1:4"'
           write(1,*) 's3 LINEWIDTH 2.0'
+          write(1,*) 'READ BLOCK "pot_ext.dat"'
+          write(1,*) 'BLOCK xy "1:2"'
           write(1,*) 'WORLD YMIN -1.0'
           write(1,*) 'WORLD YMAX 1.0'
           if(idxmov.le.9) then

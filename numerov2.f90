@@ -129,6 +129,7 @@ contains
           do i=1,molecule%mesh%nactive
              molecule%pot%hartree(i)=molecule%pot%hartree(i)*r(i)
           end do
+
           call Hartree_cg(molecule,molecule%mesh,r,molecule%pot)
           do i=1,molecule%mesh%nactive
              molecule%pot%hartree(i)=molecule%pot%hartree(i)/r(i)
@@ -247,6 +248,7 @@ contains
        Vout(1)=0.001
        call numerov_integrate(outward,Q,Vout,molecule%mesh%nactive,sqrd)
        n_nodes=count_nodes(Vout,molecule%mesh%nactive)
+
        write(*,'(A,I0,A,F8.4,A,I0)',advance='no') " Numerov_step> phase 1 > eps(",iloop,")=",eps," n_node(s)=",n_nodes
        if(n_nodes.gt.n_nodes_wanted) then
           emax=eps

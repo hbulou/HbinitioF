@@ -16,7 +16,11 @@ box_width=50.0
 box_radius=20.0
 box_shape=cylinder
 box_center=0.5 0.5 0.5
+<<<<<<< HEAD
 dimension=3
+=======
+dimension=2
+>>>>>>> d227a7ca718f0a5a6cbd4cec3b5cec18746fb17a
 perturb_intensity=1.0
 perturb_sigma=1.0
 perturb_shape=gaussian

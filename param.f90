@@ -117,6 +117,7 @@ contains
        end if
 
 
+
        if(field(1).eq."loopmax >") then
           read(field(2),*) param%loopmax
        end if

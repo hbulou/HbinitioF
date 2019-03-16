@@ -126,40 +126,39 @@ contains
     allocate(mesh%ijk_to_idx(mesh%Nx,mesh%Ny,mesh%Nz))
     mesh%nactive=0
     mesh%nunactive=mesh%Ntot+1
-!    if((mesh%dim.eq.3).or.(mesh%dim.eq.2)) then   ! 3D
-       do k=1,mesh%Nz
-          z=(k-1)*mesh%dz
-          do i=1,mesh%Nx
-             x=(i-1)*mesh%dx
-             do j=1,mesh%Ny
-                y=(j-1)*mesh%dy
-                CompDomain=.FALSE.
-                select case (mesh%box%shape)
-                case ("sphere")
-                   !                if(mesh%box%shape.eq."sphere") then
-                   d=((x-mesh%box%center(1))**2&
-                        +(y-mesh%box%center(2))**2&
-                        +(z-mesh%box%center(3))**2)**(0.5)
-                   if(d.le.mesh%box%radius) CompDomain=.TRUE.
-                case ("cylinder")
-                   !                else                   if(mesh%box%shape.eq."cylinder") then
-                   d=((x-mesh%box%center(1))**2&
-                        +(y-mesh%box%center(2))**2)**(0.5)
-                   if(d.le.mesh%box%radius) CompDomain=.TRUE.
-                case("cube")
-                   !                   else                   if(mesh%box%shape.eq."cube") then
-                   if((abs(x-mesh%box%center(1)).le.mesh%box%radius).and.&
-                        (abs(y-mesh%box%center(2)).le.mesh%box%radius).and.&
-                        (abs(z-mesh%box%center(3)).le.mesh%box%radius)) &
-                        CompDomain=.TRUE.
-                case default
-                      !                   else
-                   print *,' STOP in set_idx_list(): undefined ',mesh%box%shape,'  shape!'
-                   stop
+    !    if((mesh%dim.eq.3).or.(mesh%dim.eq.2)) then   ! 3D
+    do k=1,mesh%Nz
+       z=(k-1)*mesh%dz
+       do i=1,mesh%Nx
+          x=(i-1)*mesh%dx
+          do j=1,mesh%Ny
+             y=(j-1)*mesh%dy
+             CompDomain=.FALSE.
+             select case (mesh%box%shape)
+             case ("sphere")
+                !                if(mesh%box%shape.eq."sphere") then
+                d=((x-mesh%box%center(1))**2&
+                     +(y-mesh%box%center(2))**2&
+                     +(z-mesh%box%center(3))**2)**(0.5)
+                if(d.le.mesh%box%radius) CompDomain=.TRUE.
+             case ("cylinder")
+                !                else                   if(mesh%box%shape.eq."cylinder") then
+                d=((x-mesh%box%center(1))**2&
+                     +(y-mesh%box%center(2))**2)**(0.5)
+                if(d.le.mesh%box%radius) CompDomain=.TRUE.
+             case("cube")
+                !                   else                   if(mesh%box%shape.eq."cube") then
+                if((abs(x-mesh%box%center(1)).le.mesh%box%radius).and.&
+                     (abs(y-mesh%box%center(2)).le.mesh%box%radius).and.&
+                     (abs(z-mesh%box%center(3)).le.mesh%box%radius)) &
+                     CompDomain=.TRUE.
+             case default
+                !                   else
+                print *,' STOP in set_idx_list(): undefined ',mesh%box%shape,'  shape!'
+                stop
                    !                end if
-                end select
-
-                if(CompDomain) then
+             end select
+             if(CompDomain) then
                    mesh%nactive=mesh%nactive+1
                    mesh%ijk_to_idx(i,j,k)%n=mesh%nactive
                    mesh%ijk_to_idx(i,j,k)%active=.TRUE.
@@ -190,10 +189,12 @@ contains
              end do
           end do
        end do
-!    else
-!       print *,' STOP in set_nodes(): dimension=',mesh%dim,' not yet implemented!'
-!       stop
-!    end if
+
+       !    else
+       !       print *,' STOP in set_nodes(): dimension=',mesh%dim,' not yet implemented!'
+       !       stop
+       !    end if
+       
 
     
     open(unit=1,file='domain.xyz',form='formatted',status='unknown')
@@ -271,6 +272,7 @@ contains
                 m%node(nn)%n_bound=m%node(nn)%n_bound+1
                 m%node(nn)%list_bound(m%node(nn)%n_bound)=m%ijk_to_idx(i-1,j,k)%n
                 m%node(m%ijk_to_idx(i-1,j,k)%n)%usefull_unactive=.TRUE.
+
              end if
           end if
           if(i.lt.m%Nx) then
