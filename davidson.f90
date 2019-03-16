@@ -28,7 +28,9 @@ contains
     
     allocate(Vdump(m%nactive,nvec))
 
-    if(tag.eq.'rand') then
+    select case (tag)
+    case ('rand')
+       !    if(tag.eq.'rand') then
        print *,'Init_basis_set > Random initialization'
        call srand(seed)
        do i=1,nvec
@@ -36,12 +38,14 @@ contains
              Vdump(j,i)=rand()
           end do
        end do
-    else
+    case default
+       !    else
        print *,'Init_basis_set >  wfc initialization'
        do i=1,nvec
           call dcopy(m%nactive,molecule%wf%wfc(:,i),1,Vdump(:,i),1) ! g->d
        end do
-    end if
+       !    end if
+    end select
 
     do i=1,nvec
        normloc=ddot(m%nactive,Vdump(:,i),1,Vdump(:,i),1)
@@ -75,19 +79,22 @@ contains
     !  nvecmin=2
     nvec=param%nvecmin
     allocate(V(mesh%nactive,nvec))
-    if (param%init_wf)   then
-       if (.not.(param%restart))   then
-          print *,"new calculation"
-          call init_basis_set(V,nvec,mesh,molecule,'rand')
-       else
-          print *,'restart an old calculation'
+    select case (param%init_wf)
+    case (.TRUE.)
+       print *,"Davidson > Initialisation of the wf"
+       select case (param%restart)
+       case (.TRUE.)
+          print *,'Davidson> restart an old calculation'
           call read_config(V,mesh,nvec)
-       end if
-    else
+       case (.FALSE.)
+          print *,"Davidson > new calculation"
+          call init_basis_set(V,nvec,mesh,molecule,'rand')
+       end select
+    case (.FALSE.)
        call init_basis_set(V,nvec,mesh,molecule,'wfc')
-          !      call check_ortho(V,nvec,mesh%nactive)
-          !       stop
-    end if
+       !      call check_ortho(V,nvec,mesh%nactive)
+       !       stop
+    end select
     
     iloop=1
     cvg%ncvg=0

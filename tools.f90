@@ -224,6 +224,7 @@ contains
          print *,"Compute density > mesh%dv=",mesh%dv
          print *,"Compute density > mesh%dx=",mesh%dx
          print *,"Compute density > mesh%Nx=",mesh%Nx
+         print *,"Compute density > mesh%Ntot=",mesh%Ntot
          print *,"Compute density > mesh%Nactive=",mesh%nactive
          print *,"Compute density > mesh%Nunactive=",mesh%nunactive
          do i=1,mesh%nbound

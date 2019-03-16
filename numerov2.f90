@@ -11,12 +11,13 @@ contains
   !
   ! --------------------------------------------------------------------------------------
   subroutine numerov(molecule,cvg,param)
+    implicit none
     type(t_molecule)::molecule
     type(t_cvg)::cvg
     type(t_param)::param
 
 
-    integer :: i,j,n_nodes_wanted,idxwfc,nwfc,l
+    integer :: i,j,n_nodes_wanted,idxwfc,nwfc
     double precision,allocatable::r(:)
     integer::iloop
     character (len=1024) :: filename
@@ -33,7 +34,7 @@ contains
     do i=1,molecule%mesh%nactive
        r(i)=i*molecule%mesh%dx
     end do
-
+    print *,"# numerov > dx=",molecule%mesh%dx," first point @ r=",r(1)
     ! V=rR=r^(l+1)*summation
     iloop=1
     cvg%cvg=.FALSE.
@@ -49,161 +50,160 @@ contains
     do while ((iloop.le.param%loopmax).and.(.not.cvg%cvg))
        print *,'Numerov> ----------------------------------------------------------------------------'
        print *,'Numerov> iloop=',iloop
-       l=0
        ! ================================
        !  updating the potential
        ! ================================
        do i=1,molecule%mesh%nactive
-          molecule%pot%tot(i)=-param%Z/r(i)+0.5*l*(l+1)/r(i)**2
+          molecule%pot%tot(i)=-param%Z/r(i)+0.5*param%lorb*(param%lorb+1)/r(i)**2
        end do
        if(param%hartree) then
           do i=1,molecule%mesh%nactive
              molecule%pot%tot(i)=molecule%pot%tot(i)+molecule%pot%hartree(i)
           end do
        end if
-          if(param%exchange) then
-             do i=1,molecule%mesh%nactive
-                molecule%pot%tot(i)=molecule%pot%tot(i)+molecule%pot%Vx(i)
-             end do
-          end if
-       
-          open(unit=1,file='pot.dat',form='formatted',status='unknown')
-          do i=2,molecule%mesh%nactive
-             write(1,*) r(i),molecule%pot%tot(i),-param%Z/r(i),0.5*l*(l+1)/r(i)**2,&
-                  molecule%pot%hartree(i),molecule%pot%Vx(i)
-          end do
-          close(1)
-          print *,'Numerov> Potential extrema ',minval(molecule%pot%tot),maxval(molecule%pot%tot)
-
-
-          ! ==============================================
-          ! computing the radial part of the wave function for different nodes (n)
-          !    --> calling numerov_step()
-          !==============================================
-          nwfc=cvg%nvec_to_cvg
-          print *,'Numerov> ',nwfc,' wavefunction to converge'
-          do i=1,nwfc
-             n_nodes_wanted=i       
-             idxwfc=i
-             call numerov_step(n_nodes_wanted,molecule,r,cvg,&
-                  param,idxwfc,molecule%pot,l,molecule%mesh)
-          end do
-
-          ! =========================================
-          ! from u(r) -> the electron density rho(r) we need to compute
-          !        the Exchange potential
-          ! =========================================
-          molecule%rho=0.0
-          do j=1,param%noccstate
-             do i=1,molecule%mesh%nactive
-                molecule%rho(i)=-(molecule%wf%wfc(i,j)/r(i))**2
-             end do
-          end do
-          !==========================================
-          ! computing the exchange potential and the exchange nrj
-          !==========================================
-          if(param%exchange) then
-             do i=1,molecule%mesh%nactive
-                molecule%pot%Vx(i)=-(3.0*molecule%wf%wfc(i,1)**2/(2*(pi*r(i))**2))**(1.0/3.0)
-             end do
-             molecule%pot%EX=  0.0
-             do i=1,molecule%mesh%nactive-1
-                molecule%pot%EX=molecule%pot%EX+&
-                     0.5*molecule%mesh%dx*(&
-                     molecule%pot%Vx(i)*molecule%wf%wfc(i,1)**2+&
-                     molecule%pot%Vx(i+1)*molecule%wf%wfc(i+1,1)**2)
-             end do
-          end if
-          
-          !         call serie(molecule,mesh,r)
-          !        open(unit=1,file=trim(param%prefix)//'/rho.dat',form='formatted',status='unknown')
-          !       do i=1,mesh%nactive
-          !         write(1,*) r(i),molecule%rho(i)/r(i)
-          !     end do
-          !    close(1)
-          
-          !==========================================
-          ! computing the Hartree potential -> calling hartree_cg()
-          !==========================================
-          if(param%hartree) then
-             do i=1,molecule%mesh%nactive
-                molecule%pot%hartree(i)=molecule%pot%hartree(i)*r(i)
-             end do
-             call Hartree_cg(molecule,molecule%mesh,r,molecule%pot)
-             do i=1,molecule%mesh%nactive
-                molecule%pot%hartree(i)=molecule%pot%hartree(i)/r(i)
-             end do
-             ! Hartree energy
-             molecule%pot%EHartree=  0.0
-             do i=1,molecule%mesh%nactive-1
-                molecule%pot%EHartree=molecule%pot%EHartree+&
-                     0.5*molecule%mesh%dx*(&
-                     molecule%pot%hartree(i)*molecule%wf%wfc(i,1)**2+&
-                     molecule%pot%hartree(i+1)*molecule%wf%wfc(i+1,1)**2)
-             end do
-          end if
-          ! ==============================
-          ! check the convergence
-          ! ==============================
-          if(iloop.eq.1) then
-             cvg%total_nrj%last=2*molecule%wf%eps(1)
-             if(param%hartree) cvg%total_nrj%last=cvg%total_nrj%last-molecule%pot%EHartree
-             if(param%exchange) cvg%total_nrj%last=cvg%total_nrj%last+0.5*molecule%pot%EX
-             
-             cvg%total_nrj%previous=cvg%total_nrj%last
-             open(unit=1,file=param%filenrj,form='formatted',status='unknown',access='append')
-             write(1,'(A4,A16,A16,A16,A16,A16)') "#loop","ev(1)","EHartree","EX","total_nrj","dnrj";
-             close(1)
-          else
-             cvg%total_nrj%previous=cvg%total_nrj%last
-             
-             cvg%total_nrj%last=2*molecule%wf%eps(1)
-             if(param%hartree) cvg%total_nrj%last=cvg%total_nrj%last-molecule%pot%EHartree
-             if(param%exchange) cvg%total_nrj%last=cvg%total_nrj%last+0.5*molecule%pot%EX
-             
-             
-             cvg%total_nrj%dnrj=cvg%total_nrj%last-cvg%total_nrj%previous
-          end if
-       
-          if(abs(cvg%total_nrj%dnrj).lt.cvg%ETA) cvg%cvg=.TRUE.
-          open(unit=1,file=param%filenrj,form='formatted',status='unknown',access='append')
-          write(1,'(I4,F16.8,F16.8,F16.8,F16.8,E16.8)') iloop,molecule%wf%eps(1),&
-               molecule%pot%EHartree,molecule%pot%EX,&
-               cvg%total_nrj%last,cvg%total_nrj%dnrj
-          close(1)
-
-
-          do i=1,nwfc
-             print *,'Numerov - ev > ',molecule%wf%eps(i),' Ha=',27.211*molecule%wf%eps(i),' eV'
-          end do
-
-
-          write(filename,'(a,a,i0,a)') trim(param%prefix),'/wfc',iloop,'.dat'
-          open(unit=1,file=filename,form='formatted',status='unknown')
+       if(param%exchange) then
           do i=1,molecule%mesh%nactive
-             write(1,*) r(i),(molecule%wf%wfc(i,j),j=1,nwfc)
+             molecule%pot%tot(i)=molecule%pot%tot(i)+molecule%pot%Vx(i)
           end do
-          close(1)
-          
-          !       write(filename,'(a,a,i0,a)') trim(param%prefix),'/potential',iloop,'.dat'
-          write(filename,'(a,a)') trim(param%prefix),'/potential.dat'
-          open(unit=1,file=filename,form='formatted',status='unknown')
-          do i=1,molecule%mesh%nactive
-             write(1,*) r(i),molecule%pot%tot(i),molecule%pot%hartree(i),&
-                  molecule%pot%VX(i),molecule%rho(i)
-          end do
-          close(1)
-          
-          iloop=iloop+1
+       end if
+       
+       open(unit=1,file='pot.dat',form='formatted',status='unknown')
+       do i=2,molecule%mesh%nactive
+          write(1,*) r(i),molecule%pot%tot(i),-param%Z/r(i),0.5*param%lorb*(param%lorb+1)/r(i)**2,&
+               molecule%pot%hartree(i),molecule%pot%Vx(i)
        end do
+       close(1)
+       print *,'Numerov> Potential extrema ',minval(molecule%pot%tot),maxval(molecule%pot%tot)
 
+
+       ! ==============================================
+       ! computing the radial part of the wave function for different nodes (n)
+       !    --> calling numerov_step()
+       !==============================================
+       nwfc=cvg%nvec_to_cvg
+       print *,'Numerov> ',nwfc,' wavefunction to converge'
+       do i=1,nwfc
+          n_nodes_wanted=i       
+          idxwfc=i
+          call numerov_step(n_nodes_wanted,molecule,r,cvg,&
+               param,idxwfc,molecule%pot,molecule%mesh)
+       end do
+       
+       ! =========================================
+       ! from u(r) -> the electron density rho(r) we need to compute
+       !        the Exchange potential
+       ! =========================================
+       molecule%rho=0.0
+       do j=1,param%noccstate
+          do i=1,molecule%mesh%nactive
+             molecule%rho(i)=-(molecule%wf%wfc(i,j)/r(i))**2
+          end do
+       end do
+       !==========================================
+       ! computing the exchange potential and the exchange nrj
+       !==========================================
+       if(param%exchange) then
+          do i=1,molecule%mesh%nactive
+             molecule%pot%Vx(i)=-(3.0*molecule%wf%wfc(i,1)**2/(2*(pi*r(i))**2))**(1.0/3.0)
+          end do
+          molecule%pot%EX=  0.0
+          do i=1,molecule%mesh%nactive-1
+             molecule%pot%EX=molecule%pot%EX+&
+                  0.5*molecule%mesh%dx*(&
+                  molecule%pot%Vx(i)*molecule%wf%wfc(i,1)**2+&
+                  molecule%pot%Vx(i+1)*molecule%wf%wfc(i+1,1)**2)
+          end do
+       end if
+       
+       !         call serie(molecule,mesh,r)
+       !        open(unit=1,file=trim(param%prefix)//'/rho.dat',form='formatted',status='unknown')
+       !       do i=1,mesh%nactive
+       !         write(1,*) r(i),molecule%rho(i)/r(i)
+       !     end do
+       !    close(1)
+       
+       !==========================================
+       ! computing the Hartree potential -> calling hartree_cg()
+       !==========================================
+       if(param%hartree) then
+          do i=1,molecule%mesh%nactive
+             molecule%pot%hartree(i)=molecule%pot%hartree(i)*r(i)
+          end do
+          call Hartree_cg(molecule,molecule%mesh,r,molecule%pot)
+          do i=1,molecule%mesh%nactive
+             molecule%pot%hartree(i)=molecule%pot%hartree(i)/r(i)
+          end do
+          ! Hartree energy
+          molecule%pot%EHartree=  0.0
+          do i=1,molecule%mesh%nactive-1
+             molecule%pot%EHartree=molecule%pot%EHartree+&
+                  0.5*molecule%mesh%dx*(&
+                  molecule%pot%hartree(i)*molecule%wf%wfc(i,1)**2+&
+                  molecule%pot%hartree(i+1)*molecule%wf%wfc(i+1,1)**2)
+          end do
+       end if
+       ! ==============================
+       ! check the convergence
+       ! ==============================
+       if(iloop.eq.1) then
+          cvg%total_nrj%last=2*molecule%wf%eps(1)
+          if(param%hartree) cvg%total_nrj%last=cvg%total_nrj%last-molecule%pot%EHartree
+          if(param%exchange) cvg%total_nrj%last=cvg%total_nrj%last+0.5*molecule%pot%EX
+          
+          cvg%total_nrj%previous=cvg%total_nrj%last
+          open(unit=1,file=param%filenrj,form='formatted',status='unknown',access='append')
+          write(1,'(A4,A16,A16,A16,A16,A16)') "#loop","ev(1)","EHartree","EX","total_nrj","dnrj";
+          close(1)
+       else
+          cvg%total_nrj%previous=cvg%total_nrj%last
+          
+          cvg%total_nrj%last=2*molecule%wf%eps(1)
+          if(param%hartree) cvg%total_nrj%last=cvg%total_nrj%last-molecule%pot%EHartree
+          if(param%exchange) cvg%total_nrj%last=cvg%total_nrj%last+0.5*molecule%pot%EX
+          
+          
+          cvg%total_nrj%dnrj=cvg%total_nrj%last-cvg%total_nrj%previous
+       end if
+       
+       if(abs(cvg%total_nrj%dnrj).lt.cvg%ETA) cvg%cvg=.TRUE.
+       open(unit=1,file=param%filenrj,form='formatted',status='unknown',access='append')
+       write(1,'(I4,F16.8,F16.8,F16.8,F16.8,E16.8)') iloop,molecule%wf%eps(1),&
+            molecule%pot%EHartree,molecule%pot%EX,&
+            cvg%total_nrj%last,cvg%total_nrj%dnrj
+       close(1)
+       
+       
+       do i=1,nwfc
+          print *,'Numerov - ev > ',molecule%wf%eps(i),' Ha=',27.211*molecule%wf%eps(i),' eV'
+       end do
+       
+       
+       write(filename,'(a,a,i0,a)') trim(param%prefix),'/wfc',iloop,'.dat'
+       open(unit=1,file=filename,form='formatted',status='unknown')
+       do i=1,molecule%mesh%nactive
+          write(1,*) r(i),(molecule%wf%wfc(i,j),j=1,nwfc)
+       end do
+       close(1)
+       
+       !       write(filename,'(a,a,i0,a)') trim(param%prefix),'/potential',iloop,'.dat'
+       write(filename,'(a,a)') trim(param%prefix),'/potential.dat'
+       open(unit=1,file=filename,form='formatted',status='unknown')
+       do i=1,molecule%mesh%nactive
+          write(1,*) r(i),molecule%pot%tot(i),molecule%pot%hartree(i),&
+               molecule%pot%VX(i),molecule%rho(i)
+       end do
+       close(1)
+       
+       iloop=iloop+1
+    end do
+    
   end subroutine numerov
   ! --------------------------------------------------------------------------------------
   !
   !             numerov_step()
   !
   ! --------------------------------------------------------------------------------------
-  subroutine numerov_step(n_nodes_wanted,molecule,r,cvg,param,idxwfc,pot,l,mesh)
+  subroutine numerov_step(n_nodes_wanted,molecule,r,cvg,param,idxwfc,pot,mesh)
     integer :: n_nodes_wanted
     type(t_mesh)::mesh
     type(t_potential)::pot
@@ -215,7 +215,7 @@ contains
     integer::n_nodes,idxwfc
     double precision::eps
     double precision,allocatable::Q(:),Vin(:),Vout(:),sqrd
-    integer :: impt,l,i
+    integer :: impt,i
     double precision::emin,emax,dVin,dVout,Iout,Iin,deps,epsold,facsign,eta
     logical,parameter :: outward=.TRUE.,inward=.FALSE.
     ! first we search an eigenenergy close to the soution
@@ -228,8 +228,11 @@ contains
     
     emax=min(0.0,maxval(pot%tot))
     emin=1e10
-    print * ,'Numerov_step> Potential @ infinite=',emax,maxval(pot%tot)    
-    print *,"Numerov_step> Searching a wfc with ",n_nodes_wanted," nodes" 
+    print *,"====================================================================="
+    print *,"=                           Numerov_step                            ="
+    print *,"====================================================================="
+    print *,' Numerov_step> Potential @ infinite=',emax,maxval(pot%tot)    
+    print *," Numerov_step> Searching a wfc with ",n_nodes_wanted," nodes" 
 
     eps=pot%tot(molecule%mesh%nactive/2)
     n_nodes=-1
@@ -244,7 +247,7 @@ contains
        Vout(1)=0.001
        call numerov_integrate(outward,Q,Vout,molecule%mesh%nactive,sqrd)
        n_nodes=count_nodes(Vout,molecule%mesh%nactive)
-       write(*,'(A,I0,A,F8.4,A,I0)',advance='no') 'phase 1 > eps(',iloop,')=',eps,' n_node(s)=',n_nodes
+       write(*,'(A,I0,A,F8.4,A,I0)',advance='no') " Numerov_step> phase 1 > eps(",iloop,")=",eps," n_node(s)=",n_nodes
        if(n_nodes.gt.n_nodes_wanted) then
           emax=eps
           facsign=eps-1.0
@@ -360,9 +363,9 @@ contains
        !write(*,'(A,I4,A,F8.4,A,I4,A,F8.4,A,F8.4,A)') '(2) eps(',iloop,')=',eps,&
        !     ' number of node(s)=',n_nodes,' [emin,emax]=[',emin,',',emax,']'
 
- !      write(*,'(A,I4,A,F8.4,A,F8.4,A,F8.4,A,E12.6,A,E12.6,A,I4,A,E12.6,A,E12.6)') 'epsmax(',iloop,')=',eps,&
-  !          ' [emin,emax]=[',emin,',',emax,'] eta=',eta,' deps=',deps,' impt=',impt,&
-   !         ' dVout=',dVout/Vout(impt),' dVin=',dVin/Vin(impt)
+       !      write(*,'(A,I4,A,F8.4,A,F8.4,A,F8.4,A,E12.6,A,E12.6,A,I4,A,E12.6,A,E12.6)') 'epsmax(',iloop,')=',eps,&
+       !          ' [emin,emax]=[',emin,',',emax,'] eta=',eta,' deps=',deps,' impt=',impt,&
+       !         ' dVout=',dVout/Vout(impt),' dVin=',dVin/Vin(impt)
 
 
        if(n_nodes.le.(n_nodes_wanted)) then

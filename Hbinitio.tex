@@ -27,11 +27,13 @@
     on chain},
   line/.style = {draw},
 }
+\usepackage{amsmath}
 \begin{document}
 
 A detailled description of the application of the finite difference method to the electronic structure has been given by Laaksonen et al in the case of an Hartree-Fock approcach\cite{laaksonen1986}.
 
 \section{Method}
+
 
 \subsection{Conjugate gradient method}
 
@@ -43,6 +45,21 @@ with respect to the vector $|x>$.
 
 
 \section{The mesh}
+We deal with the problem by using finite differences on a cubic uniform grid, ${\bm{r}_i}$.
+In such ar representation,  the Hamiltonian is sparse.
+We used second-order discretization for the Laplacian. In the framework of a finite differenc approach, the only nonvanishing matrix elements, $H_{ij}=<\bm{r}_i|\hat{H}|\bm{r}_j>$, are on the diagonal and between neighbouring points (2 in 1D, 4 in 2D and 6 in 3D):
+
+
+  \begin{equation}
+    H_{ij}=
+    \begin{cases}
+      \frac{1}{(\Delta\,x)^2+\Delta\,y)^2+\Delta\,z)^2}, & \text{if}\ i=j, \\
+      -\frac{1}{2(\Delta)^2}, & \text{if} |\bm{r}_i-\bm{r}_j|=\Delta,\\
+      0,&\text{otherwise,}
+    \end{cases}
+  \end{equation}
+where $\Delta\,x$, $\Delta\,y$, et $\Delta\,z$ are the spacing between grid points.
+
 
 Using Hartree atomic units, the Schr\"odinger we want to solve is 
 
@@ -211,6 +228,14 @@ Now the question is: how to get the values of the electrostatic potential at the
 
 \newpage
 
+\section{Structure of the input file}
+
+The input file is provided directly from the command line: \verb+./Hbinitio.x inp_davidson+ for example.
+
+It must be ended by the line \verb+cmd=end+ to indicate the end of the file.
+
+\newpage
+
 \section{Structure of the code}
 
 
@@ -235,8 +260,26 @@ Now the question is: how to get the values of the electrostatic potential at the
 
 \section{Dealing with the perturbation}
 
+\subsection{Real-space representation of the resolvent of the Hamiltonian, $\hat{H}$}
 
  
+A way to compute the electron density, $n(\bm{r})$, is to resort to the identity relating the density matrix of a system, $\rho(\bm{r},\bm{r}^\prime)$, with its one-electron Green's function:
+\begin{equation}
+  G(\bm{r},\bm{r}^\prime;\epsilon)=<\bm{r}|\hat{G}(\epsilon)|\bm{r}^\prime>=<\bm{r}|\frac{1}{\epsilon-\hat{H}}|\bm{r}^\prime>
+\end{equation}
+
+$n(\bm{r})=\rho(\bm{r},\bm{r})$
+
+Baroni and Giannozzi\cite{baroni1991} introduced a Green's function method which employs the finite difference and a real-space grid.
+
+Using the Green's method needs to calculate the inverse of $(\epsilon-\hat{H})$ which may be an huge task.
+Iterative algorithms, such as the Davidson's one, used to solve elliptic partial differential equations could in principle be used to calculate the inverse of   $(\epsilon-\hat{H})$  (in the Davidson's method they are used to compyte de $|delta>$ vector from the residual).
+However, for the Green's method, we don't need to get the \emph{full} inverse matrix but only the diagonal element of the inverse.
+
+Haydock, Heine and Kelly\cite{haydock1980,giannozzi1988} developped a convenient way to compute a \emph{single} diagonal element of the Green's function: the recursion method.
+In the recursion method, diagonal elements of the Green's function, $<\phi_0|\hat{G}|\phi_0>$, are expressed in terms of a continuous fraction whose coefficients are calculated from a chain of orthogonal states recursively generated from $|\phi_0>$:
+
+
 \section{Sources}
 \label{Sources}
 
@@ -1099,6 +1142,9 @@ end program Hbinitio
 \bibitem{laaksonen1986} L. Laaksonen, P. Pyykko, and D. Sundholm, Compu. Phys. Rep. \textbf{4}, 313 (1986).
 \bibitem{varga2011} ``Computational Nanoscience,'' (2011), K. Varga and J. A. Driscoll, Cambridge University Press.
 \bibitem{mazumder2015} ``Numerical Methods for Partial Differential Equations: Finite Difference and Finite Volume Methods,'' (2015), S. Mazumder, Academic Press.
+\bibitem{baroni1991} ``Towards Very Large-Scale Electronic-Structure Calculations'', S. Baroni and P. Giannozzi 1992 EPL \textbf{17} 547.
+\bibitem{haydock1980} Haydock R., Heine V. and Kelly M. J., J . Phys. C, \textbf{5} (1972) 2845; \textbf{8} (1975) 2591; for a review, see: Ehrenreich, H., Seitz F. and Turnbull D. (Editors), Solid State Physics, Vol. 35 (Academic Press, New York, N.Y.) 1980.
+\bibitem{giannozzi1988}  Giannozzi P., Grosso G., Moroni S. and Pastori Parravicini G., Appl. Num. Math., \textbf{4} (1988) 273.
 \end{thebibliography}
 
 \end{document}

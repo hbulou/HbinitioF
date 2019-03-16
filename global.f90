@@ -2,11 +2,11 @@ module global
   implicit none
   ! ------------------------------------------
   type t_potential
-     double precision,allocatable :: ext(:) ! external potential
-     double precision,allocatable :: hartree(:) ! hartreel potential
-     double precision,allocatable :: Vx(:) ! exchange potential
-     double precision,allocatable :: perturb(:) ! perturbation potential
-     double precision,allocatable :: tot(:) ! perturbation potential
+     double precision,allocatable :: ext(:)      ! external potential
+     double precision,allocatable :: hartree(:)  ! hartreel potential
+     double precision,allocatable :: Vx(:)       ! exchange potential
+     double precision,allocatable :: perturb(:)  ! perturbation potential
+     double precision,allocatable :: tot(:)      ! perturbation potential
      double precision::EX,Ehartree
   end type t_potential
   ! ------------------------------------------
@@ -60,6 +60,7 @@ module global
      logical:: hartree
      logical::exchange
      double precision::Z
+     integer :: lorb
   end type t_param
   !------------------------------------------
   type t_nrj
@@ -139,6 +140,7 @@ module global
      type(t_potential)::pot
      double precision,allocatable::rho(:)
   end type t_molecule
+  !------------------------------------------
 
 contains
 end module global

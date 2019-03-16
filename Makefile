@@ -4,9 +4,9 @@ INC=
 FC=gfortran
 FCPARA=mpif90
 FCOPT= -fimplicit-none -finit-local-zero -Wunused -fopenmp -finit-local-zero # -Wall -Wargument-mismatch -Wimplicit-interface
-SRC=global.f90  param.f90 tools.f90 IO.f90 poten.f90  numerov2.f90  mesh.f90 davidson.f90   time_tracking.f90 ConjugateGradient.f90 Hbinitio.f90
+SRC=global.f90  param.f90 tools.f90 IO.f90 poten.f90  numerov2.f90  mesh.f90 davidson.f90   time_tracking.f90 ConjugateGradient.f90 tdse_mod.f90 Hbinitio.f90 
 
-OBJ=time_tracking.o global.o poten.o IO.o param.o tools.o  mesh.o davidson.o ConjugateGradient.o numerov2.o  pseudopotential.o
+OBJ=time_tracking.o global.o poten.o IO.o param.o tools.o  mesh.o davidson.o ConjugateGradient.o numerov2.o  pseudopotential.o tdse_mod.o
 all: $(OBJ) Hbinitio.f90
 	$(FC) $(FCOPT)  $(OBJ) Hbinitio.f90  -o Hbinitio.x  -lblas -llapack	
 #serial:  $(SRC)
@@ -33,6 +33,8 @@ numerov2.o: numerov2.f90  global.o mesh.o poten.o ConjugateGradient.o
 ConjugateGradient.o: ConjugateGradient.f90  global.o IO.o mesh.o
 	$(FC) $(FCOPT) $< -c
 pseudopotential.o: pseudopotential.f90
+	$(FC) $(FCOPT) $< -c
+tdse_mod.o: tdse_mod.f90
 	$(FC) $(FCOPT) $< -c
 
 clean:

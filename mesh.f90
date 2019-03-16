@@ -126,7 +126,7 @@ contains
     allocate(mesh%ijk_to_idx(mesh%Nx,mesh%Ny,mesh%Nz))
     mesh%nactive=0
     mesh%nunactive=mesh%Ntot+1
-    if((mesh%dim.eq.3).or.(mesh%dim.eq.2)) then   ! 3D
+!    if((mesh%dim.eq.3).or.(mesh%dim.eq.2)) then   ! 3D
        do k=1,mesh%Nz
           z=(k-1)*mesh%dz
           do i=1,mesh%Nx
@@ -134,25 +134,31 @@ contains
              do j=1,mesh%Ny
                 y=(j-1)*mesh%dy
                 CompDomain=.FALSE.
-                if(mesh%box%shape.eq."sphere") then
+                select case (mesh%box%shape)
+                case ("sphere")
+                   !                if(mesh%box%shape.eq."sphere") then
                    d=((x-mesh%box%center(1))**2&
                         +(y-mesh%box%center(2))**2&
                         +(z-mesh%box%center(3))**2)**(0.5)
                    if(d.le.mesh%box%radius) CompDomain=.TRUE.
-                else                   if(mesh%box%shape.eq."cylinder") then
+                case ("cylinder")
+                   !                else                   if(mesh%box%shape.eq."cylinder") then
                    d=((x-mesh%box%center(1))**2&
                         +(y-mesh%box%center(2))**2)**(0.5)
                    if(d.le.mesh%box%radius) CompDomain=.TRUE.
-                else                   if(mesh%box%shape.eq."cube") then
+                case("cube")
+                   !                   else                   if(mesh%box%shape.eq."cube") then
                    if((abs(x-mesh%box%center(1)).le.mesh%box%radius).and.&
                         (abs(y-mesh%box%center(2)).le.mesh%box%radius).and.&
                         (abs(z-mesh%box%center(3)).le.mesh%box%radius)) &
                         CompDomain=.TRUE.
-                else
+                case default
+                      !                   else
                    print *,' STOP in set_idx_list(): undefined ',mesh%box%shape,'  shape!'
                    stop
-                end if
-                
+                   !                end if
+                end select
+
                 if(CompDomain) then
                    mesh%nactive=mesh%nactive+1
                    mesh%ijk_to_idx(i,j,k)%n=mesh%nactive
@@ -184,10 +190,11 @@ contains
              end do
           end do
        end do
-    else
-       print *,' STOP in set_idx_list(): dimension=',mesh%dim,' not yet implemented!'
-       stop
-    end if
+!    else
+!       print *,' STOP in set_nodes(): dimension=',mesh%dim,' not yet implemented!'
+!       stop
+!    end if
+
     
     open(unit=1,file='domain.xyz',form='formatted',status='unknown')
     write(1,*) mesh%Ntot
@@ -214,7 +221,7 @@ contains
     print *,"# set_nodes > ",mesh%nactive," actives nodes"
     print *,"# set_nodes > ",mesh%Ntot-mesh%nunactive+1," unactives nodes"
     
-    
+
     ! do i=1,mesh%N
     !    print *,mesh%node(i)%active,mesh%node(i)%usefull_unactive,mesh%node(i)%n_bound
     !    if(mesh%node(i)%usefull_unactive) then
@@ -396,7 +403,7 @@ contains
     
     m%n_usefull_unactive=0
     do i=1,m%Ntot
-       print *,m%node(i)%active,m%node(i)%usefull_unactive,m%node(i)%n_bound
+!       print *,m%node(i)%active,m%node(i)%usefull_unactive,m%node(i)%n_bound
        if(m%node(i)%usefull_unactive) then
           m%n_usefull_unactive=m%n_usefull_unactive+1
        end if

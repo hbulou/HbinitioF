@@ -37,7 +37,7 @@ contains
     double precision :: pot_ext(:)
     double precision :: pts(3),rsqr
     
-!    character (len=1024) :: filename
+    !    character (len=1024) :: filename
     integer :: i,j,k,nn
     ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     !
@@ -80,10 +80,10 @@ contains
        end do
        close(1)
        ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !
-    !           1D
-    !
-    ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+       !
+       !           1D
+       !
+       ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     else    if(m%dim.eq.1) then
        open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
        do i=1,m%Nx
@@ -136,16 +136,19 @@ contains
           pts(1)=m%node(nn)%q(1)
           pts(2)=m%node(nn)%q(2)
           rsqr=(pts(1)-m%box%center(1))**2+(pts(2)-m%box%center(2))**2
-          pot_ext(nn)=0.5*1.0*rsqr
+          pot_ext(nn)=0.0005*1.0*rsqr
           write(1,*) pts(1),pts(2),pot_ext(nn)
        end do
        close(1)
        ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    !
-    !           1D
-    !
-    ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+       !
+       !           1D
+       !
+       ! !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     else    if(m%dim.eq.1) then
+       !
+       ! Harmonic potential
+       !
        open(unit=1,file="pot_ext.dat",form='formatted',status='unknown')
        do nn=1,m%nactive
           pts(1)=m%node(nn)%q(1)

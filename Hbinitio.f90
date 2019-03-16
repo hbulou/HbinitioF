@@ -14,6 +14,7 @@ program Hbinitio
   use mesh_mod
   use davidson_mod
   use numerov_mod_dev
+  use tdse_mod
   implicit none
   !  include 'mpif.h'
   type(t_cvg) :: cvg
@@ -41,13 +42,11 @@ program Hbinitio
   END DO
   
   call time_tracking_init(time_spent)
-!  call mpi_init(ierr )
-!  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
-!  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
+  !  call mpi_init(ierr )
+  !  call MPI_COMM_RANK (MPI_COMM_WORLD, my_id, ierr)
+  !  call MPI_COMM_SIZE (MPI_COMM_WORLD, num_procs, ierr)
 
   call read_param(param)
-
-
   
   call new_molecule(molecule,param)
     
@@ -69,6 +68,11 @@ program Hbinitio
   
   allocate(perturb%coeff(cvg%nvec_to_cvg,cvg%nvec_to_cvg))          
     
+  if(param%scheme.eq.'tdse') then
+     print *,'Starting TDSE scheme'
+     call tdse(molecule,cvg,param)
+  end if
+
   if(param%scheme.eq.'numerov') then
      print *,'Starting NUMEROV scheme'
      call numerov(molecule,cvg,param)

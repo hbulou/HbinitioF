@@ -60,7 +60,8 @@ contains
     double precision::V(:,:)
     type(t_molecule)::molecule
     
-    integer :: i,j,k
+    integer :: i,j,k,nn
+    double precision::val
     character (len=1024) :: filecube
     
     do i=1,param%nvec_to_cvg
@@ -74,7 +75,11 @@ contains
           open(unit=1,file=filecube,form='formatted',status='unknown')
           do j=1,mesh%Nx
              do k=1,mesh%Ny
-                write(1,*) j*mesh%dx,k*mesh%dy,V(j+(k-1)*mesh%Nx,i)
+                nn=mesh%ijk_to_idx(j,k,1)%n
+                val=0.0
+                if(mesh%node(nn)%active) val=V(nn,i)
+
+                write(1,*) j*mesh%dx,k*mesh%dy,val
              end do
           end do
           close(1)

@@ -52,6 +52,7 @@ contains
     param%hartree=.FALSE.
     param%exchange=.FALSE.
     param%Z=1.0
+    param%lorb=0
     print *,'Reading ',param%inputfile
     open(unit=1,file=param%inputfile,form='formatted')
 
@@ -161,12 +162,19 @@ contains
        if(field(1).eq."Zato >") then
           read(field(2),*) param%Z
        end if
+       if(field(1).eq."lorb >") then
+          read(field(2),*) param%lorb
+       end if
 
 
        
     end do
     close(1)    
 
+
+    if(param%dim.lt.3) param%box%center(3)=0.0
+    if(param%dim.lt.2) param%box%center(2)=0.0
+    
 
     print *,'#prefix=',param%prefix
     call system("mkdir "//param%prefix)
@@ -203,6 +211,7 @@ contains
     print *,'#nvec_to_cvg=',param%nvec_to_cvg
     print *,"#occupation= ",(param%occupation(i),i=1,param%nvec_to_cvg)
     print *,'#Zato=',param%Z
+    print *,'#lorb=',param%lorb
     print *,'#hartree=',param%hartree
     print *,'#exchange=',param%exchange
     print *,'#box_width=',param%box%width
@@ -228,6 +237,7 @@ contains
   ! --------------------------------------------------------------------------------------
 
       subroutine line_parser(line,nfield,field)
+        implicit none
         character (len=1024)::line,redline
         character (len=32)::field(32)
         integer::eqidx,lline,nfield,debidx,endidx,i
