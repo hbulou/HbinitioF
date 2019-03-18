@@ -4,6 +4,7 @@ module davidson_mod
   use mesh_mod
   use poten
   use param_mod
+  use IO
   implicit none
 contains
   ! --------------------------------------------------------------------------------------

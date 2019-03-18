@@ -15,6 +15,7 @@ program Hbinitio
   use davidson_mod
   use numerov_mod_dev
   use tdse_mod
+  use operation_mod
   implicit none
   !  include 'mpif.h'
   type(t_cvg) :: cvg
@@ -77,6 +78,12 @@ program Hbinitio
      print *,'Starting NUMEROV scheme'
      call numerov(molecule,cvg,param)
   end if
+
+  if(param%scheme.eq.'operation') then
+     print *,'Starting OPERATION scheme'
+     call operation(param,molecule%mesh)     
+  end if
+
   
   if(param%scheme.eq.'davidson') then
      print *,'Starting DAVIDSON scheme'

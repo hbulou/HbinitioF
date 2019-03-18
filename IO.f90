@@ -180,9 +180,15 @@ contains
     double precision :: V(:,:)
     integer::nvecmin,i,j
     logical :: file_exists
+    integer::npoints, nvec
+    character(len=128)::junk
+    
     INQUIRE(FILE="evectors.dat", EXIST=file_exists)
     if(file_exists) then
        open(unit=1,file="evectors.dat",form='formatted',status='unknown')
+       read(1,*)  junk,junk,npoints
+       read(1,*)    junk,junk,nvec
+       print *,"npoints=",npoints," nvec=",nvec
        do i=1,m%nactive
           read(1,*) (V(i,j),j=1,nvecmin)
        end do
