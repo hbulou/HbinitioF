@@ -1,6 +1,7 @@
 module tdse_mod
     use global
     use tools
+    use IO
     implicit none
 contains
     subroutine tdse(molecule,cvg,param)
@@ -175,40 +176,7 @@ contains
        end do
        close(1)
 
-
-       if(mod(time_loop,1000).eq.0) then
-          open(unit=1,file="plot_wfc.bfile",form='formatted',status='unknown')
-          write(1,*) 'READ BLOCK "tdse.dat"'
-          write(1,*) 'BLOCK xy "1:4"'
-          write(1,*) 's0 LINEWIDTH 2.0'
-          write(1,*) 'READ BLOCK "wfc.dat"'
-          write(1,*) 'BLOCK xy "1:2"'
-          write(1,*) 's1 LINEWIDTH 2.0'
-          write(1,*) 'BLOCK xy "1:3"'
-          write(1,*) 's2 LINEWIDTH 2.0'
-          write(1,*) 'BLOCK xy "1:4"'
-          write(1,*) 's3 LINEWIDTH 2.0'
-          write(1,*) 'READ BLOCK "pot_ext.dat"'
-          write(1,*) 'BLOCK xy "1:2"'
-          write(1,*) 'WORLD YMIN -1.0'
-          write(1,*) 'WORLD YMAX 1.0'
-          if(idxmov.le.9) then
-             write(filename,'(A,I1,A)') 'PRINT TO "output0000',idxmov,'.png"'
-          else        if(idxmov.le.99) then
-             write(filename,'(A,I2,A)') 'PRINT TO "output000',idxmov,'.png"'
-          else        if(idxmov.le.999) then
-             write(filename,'(A,I3,A)') 'PRINT TO "output00',idxmov,'.png"'
-          else        if(idxmov.le.999) then
-             write(filename,'(A,I5,A)') 'PRINT TO "output0',idxmov,'.png"'
-          end if
-          write(1,*) trim(filename)
-          write(1,*) 'HARDCOPY DEVICE "PNG"'
-          write(1,*) 'PRINT'
-          close(1)
-          !       call system("xmgrace -batch plot_wfc.bfile -nosafe -hardcopy")
-          call execute_command_line("xmgrace -batch plot_wfc.bfile -nosafe -hardcopy",WAIT=.TRUE.)
-          idxmov=idxmov+1
-       end if
+       if(mod(time_loop,1000).eq.0) call  save_agr(idxmov)
        
        itmp=oldt ; oldt=newt ; newt=itmp
        

@@ -8,6 +8,48 @@ contains
   !              SAVE_CUBE()
   !
   ! --------------------------------------------------------------------------------------
+  subroutine save_agr(idxmov)
+    implicit none
+    integer::idxmov
+    character (len=1024) :: filename
+
+    open(unit=1,file="plot_wfc.bfile",form='formatted',status='unknown')
+    write(1,*) 'READ BLOCK "tdse.dat"'
+    write(1,*) 'BLOCK xy "1:4"'
+    write(1,*) 's0 LINEWIDTH 2.0'
+    write(1,*) 'READ BLOCK "wfc.dat"'
+    write(1,*) 'BLOCK xy "1:2"'
+    write(1,*) 's1 LINEWIDTH 2.0'
+    write(1,*) 'BLOCK xy "1:3"'
+    write(1,*) 's2 LINEWIDTH 2.0'
+    write(1,*) 'BLOCK xy "1:4"'
+    write(1,*) 's3 LINEWIDTH 2.0'
+    write(1,*) 'READ BLOCK "pot_ext.dat"'
+    write(1,*) 'BLOCK xy "1:2"'
+    write(1,*) 'WORLD YMIN -1.0'
+    write(1,*) 'WORLD YMAX 1.0'
+    if(idxmov.le.9) then
+       write(filename,'(A,I1,A)') 'PRINT TO "output0000',idxmov,'.png"'
+    else        if(idxmov.le.99) then
+       write(filename,'(A,I2,A)') 'PRINT TO "output000',idxmov,'.png"'
+    else        if(idxmov.le.999) then
+       write(filename,'(A,I3,A)') 'PRINT TO "output00',idxmov,'.png"'
+    else        if(idxmov.le.999) then
+       write(filename,'(A,I5,A)') 'PRINT TO "output0',idxmov,'.png"'
+    end if
+    write(1,*) trim(filename)
+    write(1,*) 'HARDCOPY DEVICE "PNG"'
+    write(1,*) 'PRINT'
+    close(1)
+    !       call system("xmgrace -batch plot_wfc.bfile -nosafe -hardcopy")
+    call execute_command_line("xmgrace -batch plot_wfc.bfile -nosafe -hardcopy",WAIT=.TRUE.)
+    idxmov=idxmov+1
+  end subroutine save_agr
+  ! --------------------------------------------------------------------------------------
+  !
+  !              SAVE_CUBE()
+  !
+  ! --------------------------------------------------------------------------------------
   subroutine save_cube_3D(data,filename,m)
     implicit none
     double precision :: data(:),val
@@ -67,10 +109,14 @@ contains
     do i=1,param%nvec_to_cvg
        call norm(mesh,V(:,i))
        call dcopy(molecule%mesh%nactive,V(:,i),1,molecule%wf%wfc(:,i),1)
-       if(mesh%dim.eq.3) then    ! 3D
+
+       select case(mesh%dim)
+          ! case 3D
+       case(3)
           write(filecube,'(a,a,i0,a)') param%prefix(:len_trim(param%prefix)),'/evec',i,'.cube'
           call save_cube_3D(V(:,i),filecube,mesh)
-       else if(mesh%dim.eq.2) then   ! 2D
+          ! case 2D
+       case(2)
           write(filecube,'(a,a,i0,a)') param%prefix(:len_trim(param%prefix)),'/evec',i,'.dat'
           open(unit=1,file=filecube,form='formatted',status='unknown')
           do j=1,mesh%Nx
@@ -83,17 +129,18 @@ contains
              end do
           end do
           close(1)
-       else if(mesh%dim.eq.1) then  ! 1D
+          ! case 1D
+       case(1)
           write(filecube,'(a,i0,a)') 'evec',i,'.dat'
           open(unit=1,file=filecube,form='formatted',status='unknown')
           do j=1,mesh%nactive
              write(1,*) j*mesh%dx,V(j,i)
           end do
           close(1)
-       else
+       case default
           print *,' STOP in main(): dimension=',mesh%dim,' not yet implemented!'
           stop
-       end if
+       end select
     end do
 
   end subroutine save_wavefunction
@@ -115,6 +162,8 @@ contains
     write(filename,'(a,a)') param%prefix(:len_trim(param%prefix)),'/evectors.dat'
     print *,"# save_config > saving ",trim(filename)
     open(unit=1,file=filename,form='formatted',status='unknown')
+    write(1,*) "# nmesh=",m%nactive
+    write(1,*) "# nvec=",nvecmin
     do i=1,m%nactive
        write(1,*) (V(i,j),j=1,nvecmin)
     end do

@@ -76,26 +76,12 @@ contains
 !    double precision::normloc
  !   double precision, external :: ddot
     integer :: iloop !,lorb
-    !  nvecmin=2
+
     nvec=param%nvecmin
     allocate(V(mesh%nactive,nvec))
-    select case (param%init_wf)
-    case (.TRUE.)
-       print *,"Davidson > Initialisation of the wf"
-       select case (param%restart)
-       case (.TRUE.)
-          print *,'Davidson> restart an old calculation'
-          call read_config(V,mesh,nvec)
-       case (.FALSE.)
-          print *,"Davidson > new calculation"
-          call init_basis_set(V,nvec,mesh,molecule,'rand')
-       end select
-    case (.FALSE.)
-       call init_basis_set(V,nvec,mesh,molecule,'wfc')
-       !      call check_ortho(V,nvec,mesh%nactive)
-       !       stop
-    end select
-    
+    call davidson_basis_init(param,mesh,nvec,V,molecule)
+      
+      
     iloop=1
     cvg%ncvg=0
     molecule%wf%epsprev(:)=0.0
@@ -125,9 +111,34 @@ contains
   end subroutine davidson
   ! --------------------------------------------------------------------------------------
   !
-  !              DAVIDSON_STEP()
+  !              DAVIDSON_BASIS_INIT()
   !
   ! --------------------------------------------------------------------------------------
+    subroutine davidson_basis_init(param,mesh,nvec,V,molecule)
+      implicit none
+      type(t_param)::param
+      type(t_mesh)::mesh
+      integer::nvec
+      double precision ,allocatable:: V(:,:) ! wavefunctions
+      type(t_molecule)::molecule
+          
+      select case (param%init_wf)
+      case (.TRUE.)
+         print *,"Davidson > Initialisation of the wf"
+         select case (param%restart)
+         case (.TRUE.)
+            print *,'Davidson> restart an old calculation'
+            call read_config(V,mesh,nvec)
+         case (.FALSE.)
+            print *,"Davidson > new calculation"
+            call init_basis_set(V,nvec,mesh,molecule,'rand')
+         end select
+      case (.FALSE.)
+         call init_basis_set(V,nvec,mesh,molecule,'wfc')
+         !      call check_ortho(V,nvec,mesh%nactive)
+         !       stop
+      end select
+    end subroutine davidson_basis_init
   ! --------------------------------------------------------------------------------------
   !
   !              DAVIDSON_STEP()

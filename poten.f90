@@ -101,7 +101,7 @@ contains
   end subroutine Vext
   ! --------------------------------------------------------------------------------------
   !
-  !              Vext()
+  !              Vext2()
   !
   ! --------------------------------------------------------------------------------------
   subroutine Vext2(m,pot_ext)
@@ -154,7 +154,7 @@ contains
           pts(1)=m%node(nn)%q(1)
           rsqr=(pts(1)-m%box%center(1))**2
           pot_ext(nn)=.5*1.0*rsqr
-          write(1,*) pts(1),pot_ext(i)
+          write(1,*) pts(1),pot_ext(nn)
        end do
        close(1)
     else
